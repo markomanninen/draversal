@@ -1,2 +1,2 @@
 # draversal
-A package to traverse (also backward) uniform children field -constructed Python dictionaries in depth-first manner
+A package for depth-first traversal of Python dictionaries with uniform child fields, supporting both forward and backward navigation.
