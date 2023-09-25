@@ -1,4 +1,5 @@
 import unittest
+import re
 from draversal import *
 
 
@@ -30,6 +31,12 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         self.assertTrue(a[0][1] == [1, 1, 0])
         # c is from Child 2
         self.assertTrue(c[0][1] == [1, 0])
+    
+    def test_current_item_search(self):
+        result1 = self.traversal.search('Grandgrandchild', 'title')  # Returns: [({'title': 'Grandgrandchild'}, [1, 1, 0])]
+        result2 = self.traversal.search(re.compile(r'Grandchild [0-9]+'), 'title')  # Returns: [(Grandchild 1, [1, 0]), (Grandchild 2, [1, 1])]
+        self.assertEqual(result1, [({'title': 'Grandgrandchild'}, [1, 1, 0])])
+        self.assertEqual(result2, [({'title': 'Grandchild 1'}, [1, 0]), ({'title': 'Grandchild 2'}, [1, 1])])
 
     def test_current_item_max_depth(self):
         # counted from root

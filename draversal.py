@@ -1,4 +1,6 @@
 from contextlib import contextmanager
+import re
+
 
 class DictTraversal(dict):
     """
@@ -1205,6 +1207,41 @@ class DictTraversal(dict):
                     if subitems:
                         return _(subitems, remaining_titles[1:], local_path)
         _(self.current.get(self.children_field, []), titles)
+        return results
+    
+    def search(self, query, label_field):
+        """
+        Search for items whose label match a given query.
+
+        Parameters:
+            query (str or re.Pattern): The search query, either a string or a regular expression pattern.
+        Returns:
+            list: A list of tuples, each containing a matching item and its path.
+
+        Behavior:
+            - Initializes an empty list `results` to store matching items and their paths.
+            - Defines a nested function `_` to recursively search for items with matching titles.
+            - Calls `_` starting from the current item's subitems.
+            - Appends matching items and their paths to `results`.
+            - Returns `results`.
+
+        Example:
+            ```python
+            result1 = traversal.search('Grandgrandchild', 'title')  # Returns: [({'title': 'Grandgrandchild'}, [1, 1, 0])]
+            result2 = traversal.search(re.compile(r'Grandchild [0-9]+'), 'title')  # Returns: [({'title': 'Grandchild 1'}, [1, 0]), ({'title': 'Grandchild 2'}, [1, 1])]
+            ```
+        """
+        results = []
+        def _(subitems, new_path=[]):
+            for i, item in enumerate(subitems):
+                local_path = new_path + [i]
+                if ((isinstance(query, str) and query.lower() in item[label_field].lower()) or
+                    (isinstance(query, re.Pattern) and query.search(item[label_field]))):
+                    results.append((self._without_children(item.items()), local_path))
+                subitems = item.get(self.children_field, [])
+                if subitems:
+                    _(subitems, local_path)
+        _(self.current.get(self.children_field, []))
         return results
 
     def pretty_print(self, label_field=None):

@@ -1,4 +1,6 @@
 from contextlib import contextmanager
+import re
+
 
 class DictTraversal(dict):
     """
@@ -11,7 +13,7 @@ class DictTraversal(dict):
 
     Example:
         ```python
-        children_field = "sections"
+        children_field = 'sections'
         data = {
             'title': 'root',
             children_field: [
@@ -68,9 +70,9 @@ class DictTraversal(dict):
             - Initializes `inverted_context` as False.
 
         Parameters:
-            *args: Variable-length argument list to initialize the dictionary.
+            *args (list): Variable-length argument list to initialize the dictionary.
             children_field (str): The key used to identify children in the dictionary.
-            **kwargs: Arbitrary keyword arguments to initialize the dictionary.
+            **kwargs (dict): Arbitrary keyword arguments to initialize the dictionary.
 
         Raises:
             ValueError: If `children_field` is not provided or is not a string.
@@ -81,7 +83,7 @@ class DictTraversal(dict):
             current (dict): Points to the current node in the traversal.
             iter_method (func): Function used for moving to the next/previous item during iteration.
             next_iteration_start (bool): Flag used to control the behavior of `__iter__()`/`__next__()`.
-            prev_iteration_stop  (bool): Flag used to control the behavior of `__iter__()`/`prev()`.
+            prev_iteration_stop (bool): Flag used to control the behavior of `__iter__()`/`prev()`.
             inverted_context (bool): Flag to indicate whether the iteration context ie. direction manipulated by `with` is inverted or not.
 
         Note:
@@ -89,7 +91,7 @@ class DictTraversal(dict):
         """
         super(DictTraversal, self).__init__(*args, **kwargs)
         if not children_field or not isinstance(children_field, str):
-            raise ValueError("Childred field must be given and it must be a string")
+            raise ValueError('Childred field must be given and it must be a string.')
         self.children_field = children_field
         # Path must always be absolute
         self.path = []
@@ -113,8 +115,8 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            print(last(traversal)["title])  # Outputs: "Child 3"
-            print((-traversal)["title])  # Outputs: "Grandgrandchild"
+            print(last(traversal)['title'])  # Outputs: 'Child 3'
+            print((-traversal)['title'])  # Outputs: 'Grandgrandchild'
             ```
         """
         self.move_to_prev_item()
@@ -133,8 +135,8 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            print(root(traversal)["title])  # Outputs: "root"
-            print((+traversal)["title])  # Outputs: "Child 1"
+            print(root(traversal)['title'])  # Outputs: 'root'
+            print((+traversal)['title'])  # Outputs: 'Child 1'
             ```
         """
         self.move_to_next_item()
@@ -188,7 +190,9 @@ class DictTraversal(dict):
         Behavior:
             - Advances the iterator to the next item in the traversal.
             - Updates the path and current attributes to reflect the new traversal path.
-            - Raises StopIteration if there are no more items to traverse.
+        
+        Raises:
+            StopIteration: If there are no more items to traverse.
 
         Note:
             - This method moves the traversal to the next node relative to the current node.
@@ -203,7 +207,7 @@ class DictTraversal(dict):
                 next(traversal)  # Represents: {'title': 'root'}
                 next(traversal)  # Represents: {'title': 'Child 1'}
             except StopIteration:
-                print("No more items to traverse.")
+                print('No more items to traverse.')
             ```
         """
         # Move current pointer in the second round
@@ -344,7 +348,7 @@ class DictTraversal(dict):
             for item in traversal:
                 print(item)
 
-            # Backward traversal using the 'inverted' context manager
+            # Backward traversal using the inverted context manager
             with traversal.inverted():
                 for item in traversal:
                     print(item)
@@ -383,6 +387,7 @@ class DictTraversal(dict):
             inverted_context (bool): Inherits the value from the original object.
 
         Example:
+            ```python
             with traversal.new_root(merge=True) as new_obj:
                 # Perform operations on new_obj from the relative traversal path perspective
                 # Modifications will affect to the original traversal traversal after with block
@@ -390,6 +395,7 @@ class DictTraversal(dict):
             with traversal.new_root(merge=False) as new_obj:
                 # Perform operations on new_obj from the relative traversal path perspective
                 # Modifications will not affect to the original traversal object after with block
+            ```
         """
         if merge:
             old_path = self.path
@@ -552,7 +558,7 @@ class DictTraversal(dict):
             ```python
             root(traversal)
             # Move to Grandchild 1
-            (+++traversal).get_parent_item()  # Returns: {"title": "Child 2"}
+            (+++traversal).get_parent_item()  # Returns: {'title': 'Child 2'}
             ```
         """
         item, _ = self.get_parent_item_and_path()
@@ -814,7 +820,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.add_child(title="Child X")
+            traversal.add_child(title='Child X')
             print(last(traversal))  # Outputs: {'title': 'Child X'}
             ```
         """
@@ -843,7 +849,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.insert_child(0, title="Child X")
+            traversal.insert_child(0, title='Child X')
             print(first(traversal))  # Outputs: {'title': 'Child X'}
             ```
         """
@@ -873,7 +879,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.replace_child(0, title="CHILD 1")
+            traversal.replace_child(0, title='CHILD 1')
             print(first(traversal))  # Outputs: {'title': 'CHILD 1'}
             ```
         """
@@ -905,7 +911,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.modify(title="ROOT")
+            traversal.modify(title='ROOT')
             print(traversal)  # Outputs: {'title': 'ROOT'}
             ```
         """
@@ -942,8 +948,8 @@ class DictTraversal(dict):
             ```python
             item = traversal[0]  # Retrieves the first child of the current node
             item = traversal[(0, 0)]  # Retrieves the first child of the first child of the current node
-            items = traversal[1:2]  # Retrieves the children of the current node
-            item = traversal['name']  # Retrieves the 'name' attribute of the current node
+            items = traversal[1:2]  # Retrieves the second and third children of the current node
+            item = traversal['name']  # Retrieves the name attribute of the current node
             ```
         """
         that = self.current
@@ -958,12 +964,12 @@ class DictTraversal(dict):
                 if self.children_field in item:
                     item = item[self.children_field][i]
                 else:
-                    raise IndexError("Children not found from the given index")
+                    raise IndexError('Children not found from the given index.')
             return item
         elif isinstance(idx, str):
             return that.get(idx, None)
         else:
-            raise ValueError("Index must be one of the types: int, splice, tuple, list, or str.")
+            raise ValueError('Index must be one of the types: int, splice, tuple, list, or str.')
 
     def __delitem__(self, idx):
         """
@@ -988,8 +994,8 @@ class DictTraversal(dict):
             ```python
             del obj[0]  # Deletes the first child of the current node
             del traversal[(0, 0)]  # Deleted the first child of the first child of the current node
-            del traversal[1:2]  # Deleted the children of the current node
-            del obj['name']  # Deletes the 'name' attribute of the current node
+            del traversal[1:2]  # Deleted the second and third children of the current node
+            del obj['name']  # Deletes the name attribute of the current node
             ```
         """
         that = self.current
@@ -1001,18 +1007,18 @@ class DictTraversal(dict):
                 if self.children_field in item:
                     item = item[self.children_field][i]
                 else:
-                    raise IndexError("Children not found from the given index")
+                    raise IndexError('Children not found from the given index.')
             if self.children_field in item:
                 del item[self.children_field][idx[-1]]
             else:
-                raise IndexError("Children not found from the given index")
+                raise IndexError('Children not found from the given index.')
         elif isinstance(idx, str):
             if isinstance(that, DictTraversal):
                 super().__delitem__(idx)
             else:
                 del that[idx]
         else:
-            raise ValueError("Index must be one of the types: int, splice, tuple, list, or str.")
+            raise ValueError('Index must be one of the types: int, splice, tuple, list, or str.')
 
     def _without_children(self, items):
         """
@@ -1046,7 +1052,7 @@ class DictTraversal(dict):
             ```
         """
         if not self.current:
-            raise ValueError("Internal error: missing the current item.")
+            raise ValueError('Internal error: missing the current item.')
         return str(self._without_children(self.current.items()))
 
     def __len__(self):
@@ -1175,7 +1181,7 @@ class DictTraversal(dict):
             list: A list of tuples, each containing a node and its path that matches the field values.
 
         Behavior:
-            - Converts 'titles' to a list if it's a single string.
+            - Converts `titles` to a list if it's a single string.
             - Initializes an empty list `results` to store matching nodes and their paths.
             - Defines a recursive function `_` to search for nodes with matching titles.
             - Calls `_` starting from the current node's subnodes, passing the list of remaining titles to match.
@@ -1183,7 +1189,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.find_paths("title", ["Child 2", "Grandchild 1"])  # Returns: [({'title': 'Grandchild 1'}, [1, 0])
+            traversal.find_paths('title', ['Child 2', 'Grandchild 1'])  # Returns: [({'title': 'Grandchild 1'}, [1, 0])
             ```
         """
         if not isinstance(titles, list):
@@ -1202,6 +1208,42 @@ class DictTraversal(dict):
                         return _(subitems, remaining_titles[1:], local_path)
         _(self.current.get(self.children_field, []), titles)
         return results
+    
+    def search(self, query, label_field):
+        """
+        Search for items whose label match a given query.
+
+        Parameters:
+            query (str or re.Pattern): The search query, either a string or a regular expression pattern.
+        Returns:
+            list: A list of tuples, each containing a matching item and its path.
+
+        Behavior:
+            - Initializes an empty list `results` to store matching items and their paths.
+            - Defines a nested function `_` to recursively search for items with matching titles.
+            - Calls `_` starting from the current item's subitems.
+            - Appends matching items and their paths to `results`.
+            - Returns `results`.
+
+        Example:
+            ```python
+            result1 = traversal.search('Grandgrandchild', 'title')  # Returns: [({'title': 'Grandgrandchild'}, [1, 1, 0])]
+            result2 = traversal.search((re.compile(r'Grandchild [0-9]+'), 'title')  # Returns: [({'title': 'Grandchild 1'}, [1, 0]), ({'title': 'Grandchild 2'}, [1, 1])]
+            ```
+        """
+        results = []
+        def _(subitems, new_path=[]):
+            for i, item in enumerate(subitems):
+                local_path = new_path + [i]
+                label = item.get(label_field, "")
+                if ((isinstance(query, str) and query.lower() in label.lower()) or
+                    (isinstance(query, re.Pattern) and query.search(label))):
+                    results.append((self._without_children(item.items()), local_path))
+                subitems = item.get(self.children_field, [])
+                if subitems:
+                    _(subitems, local_path)
+        _(self.current.get(self.children_field, []))
+        return results
 
     def pretty_print(self, label_field=None):
         """
@@ -1218,7 +1260,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            traversal.pretty_print(label_field="title")  # Output:
+            traversal.pretty_print(label_field='title')  # Output:
             # root
             #   Child 1
             #   Child 2
@@ -1229,7 +1271,7 @@ class DictTraversal(dict):
             ```
         """
         that = self.current
-        print(that[label_field] if label_field else "root")
+        print(that[label_field] if label_field else 'root')
         def _(indent, items):
             for item in items:
                 print('  ' * indent + (item[label_field] if label_field and label_field in item else repr(self._without_children(item.items()))))
@@ -1258,7 +1300,7 @@ class DictTraversal(dict):
 
         Example:
             ```python
-            print(next(root(traversal)).visualize("title", from_root=True))  # Output:
+            print(next(root(traversal)).visualize('title', from_root=True))  # Output:
             # root
             # ├── Child 1*
             # ├── Child 2
@@ -1267,7 +1309,7 @@ class DictTraversal(dict):
             # │       └── Grandgrandchild
             # └── Child 3
 
-            print(next(next(root(traversal))).visualize("title"))  # Output:
+            print(next(next(root(traversal))).visualize('title'))  # Output:
             # Child 2*
             # ├── Grandchild 1
             # └── Grandchild 2
@@ -1276,11 +1318,11 @@ class DictTraversal(dict):
         """
         that = self if from_root else self.current
         current_item = self.current
-        current_title = (current_item[label_field] if label_field in current_item else self._without_children(current_item.items())) if current_item else ""
+        current_title = (current_item[label_field] if label_field in current_item else self._without_children(current_item.items())) if current_item else ''
         # We can not use __getitems__ directly, because it gets values from current item context
         labels = [v for k, v in that.items() if k == label_field]
-        item_label = labels[0] if labels else "Untitled"
-        toc = [item_label + ("*" if item_label == current_title else "")]
+        item_label = labels[0] if labels else 'Untitled'
+        toc = [item_label + ('*' if item_label == current_title else '')]
         def _(items, level=1, prefix=''):
             items_length = len(items[:])
             for i, item in enumerate(items):
@@ -1302,9 +1344,9 @@ def validate_data(data, children_field, label_field=None):
     Validates a nested dictionary structure for specific field requirements.
 
     Parameters:
-        - data (dict): The nested dictionary to validate.
-        - children_field (str): The field name that contains child dictionaries.
-        - label_field (str, optional): The field name that should exist in each dictionary, including the root.
+        data (dict): The nested dictionary to validate.
+        children_field (str): The field name that contains child dictionaries.
+        label_field (str, optional): The field name that should exist in each dictionary, including the root.
 
     Behavior:
         - Validates that the root is a non-empty dictionary.
@@ -1314,19 +1356,19 @@ def validate_data(data, children_field, label_field=None):
         - Validates that each child in `children_field` is a non-empty dictionary.
 
     Raises:
-        - ValueError: If any of the validation conditions are not met.
+        ValueError: If any of the validation conditions are not met.
 
     Example:
         ```python
         try:
             validate_data({'title': 'root', 'sections': [{'title': 'Child'}]}, 'sections', 'title')
-            print(f"Given data is valid.")
+            print('Given data is valid.')
         except ValueError as e:
-            print(f"Given data is invalid. {e}")
+            print(f'Given data is invalid. {e}')
         ```
     """
     if not isinstance(data, dict) or not data:
-        raise ValueError("Data must be a dictionary and not empty.")
+        raise ValueError('Data must be a dictionary and not empty.')
 
     if not label_field and children_field not in data:
             raise ValueError(f"The field '{children_field}' must exist in root when label field has not been given.")
@@ -1340,7 +1382,7 @@ def validate_data(data, children_field, label_field=None):
                 raise ValueError(f"The field '{children_field}' must be a list.")
             for child in children:
                 if not isinstance(child, dict) or not child:
-                    raise ValueError(f"Child must be a dictionary and it must contain data.")
+                    raise ValueError('Child must be a dictionary and it must contain data.')
                 _validate(child)
 
     _validate(data)
@@ -1358,8 +1400,10 @@ def prev(traversal):
 
     Behavior:
         - Updates the `current` attribute to point to the previous item in the tree.
-        - Raises StopIteration if there is no previous item.
         - Influenced by the `inverted` context manager.
+
+    Raises:
+        StopIteration: If there is no previous item.
 
     Note:
         - Serves as a counterpart to Python's built-in `next` function.
@@ -1371,13 +1415,14 @@ def prev(traversal):
 
     Example:
         ```python
+        # With default context
         last(traversal)
         try:
             print(traversal['title'])  # Output: Grandgrandchild
             prev(traversal)
             print(traversal['title'])  # Output: Grandchild 2
         except StopIteration:
-            print("No more items to traverse.")
+            print('No more items to traverse.')
 
         # With inverted context
         last(traversal)
@@ -1387,7 +1432,7 @@ def prev(traversal):
                 prev(traversal)
                 print(traversal['title'])  # Output: Child 3
             except StopIteration:
-                print("No more items to traverse.")
+                print('No more items to traverse.')
         ```
     """
     if traversal.inverted_context:
@@ -1406,7 +1451,7 @@ def root(traversal):
     Resets the traversal to the root item.
 
     Parameters:
-        - traversal (DictTraversal): The `DictTraversal` object to operate on.
+        traversal (DictTraversal): The `DictTraversal` object to operate on.
 
     Behavior:
         - Resets the traversal to the root item, updating the `current` attribute.
@@ -1416,7 +1461,7 @@ def root(traversal):
 
     Example:
         ```python
-        root(traversal)  # Returns: {"title": "root"}
+        root(traversal)  # Returns: {'title': 'root'}
         ```
     """
     iter(traversal)
@@ -1430,7 +1475,7 @@ def first(traversal):
     Moves the traversal to the first item relative to the root.
 
     Parameters:
-        - traversal (DictTraversal): The `DictTraversal` object to operate on.
+        traversal (DictTraversal): The `DictTraversal` object to operate on.
 
     Behavior:
         - Moves the traversal to the first item in the tree, updating the `current` attribute.
@@ -1440,7 +1485,7 @@ def first(traversal):
 
     Example:
         ```python
-        first(traversal)  # Returns: {"title": "Child 1"}
+        first(traversal)  # Returns: {'title': 'Child 1'}
         ```
     """
     if traversal.inverted_context:
@@ -1454,7 +1499,7 @@ def last(traversal):
     Moves the traversal to the last item from the current item perspective.
 
     Parameters:
-        - traversal (DictTraversal): The `DictTraversal` object to operate on.
+        traversal (DictTraversal): The `DictTraversal` object to operate on.
 
     Behavior:
         - Moves the traversal to the last item in the tree, updating the `current` attribute.
@@ -1464,9 +1509,9 @@ def last(traversal):
 
     Example:
         ```python
-        last(traversal)  # Returns: {"title": "Child 3"}
+        last(traversal)  # Returns: {'title': 'Child 3'}
         # Calling the end node, same will be returned
-        last(traversal)  # Returns: {"title": "Child 3"}
+        last(traversal)  # Returns: {'title': 'Child 3'}
         ```
     """
     if traversal.inverted_context:
@@ -1513,5 +1558,5 @@ def demo():
         ]
     }
 
-    # Initialize the DictTraversal class with revised nested sample_data and 'sections' as the children_field
+    # Initialize the DictTraversal class with revised nested sample_data and sections as the children_field
     return DictTraversal(sample_data, children_field=children_field)
