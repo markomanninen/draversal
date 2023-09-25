@@ -1397,20 +1397,17 @@ def prev(traversal):
     Returns:
         DictTraversal: The updated `DictTraversal` object pointing to the previous item.
 
+    Raises:
+        StopIteration: If there are no more items to traverse in the backward direction.
+
     Behavior:
         - Updates the `current` attribute to point to the previous item in the tree.
         - Influenced by the `inverted` context manager.
-
-    Raises:
-        StopIteration: If there is no previous item.
 
     Note:
         - Serves as a counterpart to Python's built-in `next` function.
         - Does not support a `siblings_only` argument; use `move_to_next_item` or `move_to_prev_item` directly for that.
         - Unlike `move_to_next_item` and `move_to_prev_item`, which cycle through the tree, `prev` raises StopIteration when reaching the end.
-
-    Raises:
-        StopIteration: If there are no more items to traverse in the backward direction.
 
     Example:
         ```python
@@ -1527,19 +1524,19 @@ def demo():
         - Initializes a `DictTraversal` object with the sample data.
 
     Returns:
-        - DictTraversal: An initialized `DictTraversal` object.
+        DictTraversal: An initialized `DictTraversal` object.
 
     Example:
         ```python
         traversal = demo()
         traversal.pretty_print()  # Outputs:
-        root
-          Child 1
-          Child 2
-            Grandchild 1
-            Grandchild 2
-              Grandgrandchild
-          Child 3
+        # root
+        #   Child 1
+        #   Child 2
+        #     Grandchild 1
+        #     Grandchild 2
+        #       Grandgrandchild
+        #   Child 3
         ```
     """
     children_field = 'sections'
