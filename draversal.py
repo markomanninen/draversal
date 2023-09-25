@@ -190,9 +190,6 @@ class DictTraversal(dict):
         Behavior:
             - Advances the iterator to the next item in the traversal.
             - Updates the path and current attributes to reflect the new traversal path.
-        
-        Raises:
-            StopIteration: If there are no more items to traverse.
 
         Note:
             - This method moves the traversal to the next node relative to the current node.
