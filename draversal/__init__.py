@@ -63,9 +63,9 @@ class DictTraversal(dict):
 
         Behavior:
             - Initializes the underlying dictionary with the given `*args` and `**kwargs`.
-            - Sets the `children_field` attribute for identifying child nodes in the dictionary.
+            - Sets the `children_field` attribute for identifying child items in the dictionary.
             - Initializes `path` as an empty list to keep track of the traversal path.
-            - Sets `current` to point to the root node (`self`).
+            - Sets `current` to point to the root item (`self`).
             - Sets `iter_method` to use `move_to_next_item` by default for iteration.
             - Initializes `inverted_context` as False.
 
@@ -80,7 +80,7 @@ class DictTraversal(dict):
         Attributes:
             children_field (str): The key used to identify children in the dictionary.
             path (list): Keeps track of the traversal path.
-            current (dict): Points to the current node in the traversal.
+            current (dict): Points to the current item in the traversal.
             iter_method (func): Function used for moving to the next/previous item during iteration.
             next_iteration_start (bool): Flag used to control the behavior of `__iter__()`/`__next__()`.
             prev_iteration_stop (bool): Flag used to control the behavior of `__iter__()`/`prev()`.
@@ -111,7 +111,7 @@ class DictTraversal(dict):
             - Updates the `path` and `current` attributes to reflect the new traversal path.
 
         Returns:
-            self: Returns the `DictTraversal` object itself, pointing to the previous node.
+            self: Returns the `DictTraversal` object itself, pointing to the previous item.
 
         Example:
             ```python
@@ -131,7 +131,7 @@ class DictTraversal(dict):
             - Updates the `path` and `current` attributes to reflect the new traversal path.
 
         Returns:
-            self: Returns the `DictTraversal` object itself, pointing to the next node.
+            self: Returns the `DictTraversal` object itself, pointing to the next item.
 
         Example:
             ```python
@@ -151,15 +151,15 @@ class DictTraversal(dict):
 
         Attributes:
             path (list): Reset to an empty list.
-            current (dict): Reset to point to the root node.
+            current (dict): Reset to point to the root item.
 
         Behavior:
             - Initializes the iterator for the `DictTraversal` object.
-            - Resets the traversal to the root node.
+            - Resets the traversal to the root item.
             - Returns the `DictTraversal` object itself to make it an iterator.
 
         Note:
-            - This method resets the traversal to the root node.
+            - This method resets the traversal to the root item.
 
         Example:
             ```python
@@ -178,21 +178,21 @@ class DictTraversal(dict):
         Advances the iterator to the next item in the traversal.
 
         Returns:
-            self: Returns the `DictTraversal` object itself, pointing to the next node.
+            self: Returns the `DictTraversal` object itself, pointing to the next item.
 
         Raises:
             StopIteration: If there are no more items to traverse.
 
         Attributes:
             path (list): Updated to reflect the new traversal path.
-            current (dict): Updated to point to the next node in the traversal.
+            current (dict): Updated to point to the next item in the traversal.
 
         Behavior:
             - Advances the iterator to the next item in the traversal.
             - Updates the path and current attributes to reflect the new traversal path.
 
         Note:
-            - This method moves the traversal to the next node relative to the current node.
+            - This method moves the traversal to the next item relative to the current item.
             - Unlike `move_to_next_item` and `move_to_prev_item`, which jump over the root and continue from start/end,
                 `prev` will raise a StopIteration error when it reaches the end of the traversal.
 
@@ -367,7 +367,7 @@ class DictTraversal(dict):
         Context manager for temporarily setting a new root for traversal.
 
         Behavior:
-            - If `merge` is True, creates a new `DictTraversal` object with the current node as root.
+            - If `merge` is True, creates a new `DictTraversal` object with the current item as root.
             - If `merge` is False, creates a deep copy of the current `DictTraversal` object.
             - Yields the new `DictTraversal` object for use within the context.
             - If `merge` is True, updates the root fields and restores the original path after exiting the context.
@@ -376,10 +376,10 @@ class DictTraversal(dict):
             merge (bool): Whether to merge the changes back to the original object. Default is False.
 
         Yields:
-            DictTraversal: A new `DictTraversal` object with either the current node as root or a deep copy of the original.
+            DictTraversal: A new `DictTraversal` object with either the current item as root or a deep copy of the original.
 
         Attributes:
-            current (dict): Points to the new root node in the traversal if `merge` is True.
+            current (dict): Points to the new root item in the traversal if `merge` is True.
             path (list): Restored to its original state if `merge` is True.
             inverted_context (bool): Inherits the value from the original object.
 
@@ -411,13 +411,13 @@ class DictTraversal(dict):
 
     def children(self, sibling_only=False):
         """
-        Retrieves the children of the current node.
+        Retrieves the children of the current item.
 
         Parameters:
-            sibling_only (bool, optional): If True, returns only the siblings of the current node.
+            sibling_only (bool, optional): If True, returns only the siblings of the current item.
 
         Returns:
-            list: A list of children nodes.
+            list: A list of children items.
 
         Behavior:
             - If sibling_only is True, returns a list of siblings without their children.
@@ -487,10 +487,10 @@ class DictTraversal(dict):
             sibling_only (bool, optional): If True, considers only the siblings.
 
         Returns:
-            self: Returns the DictTraversal object itself, pointing to the last node.
+            self: Returns the DictTraversal object itself, pointing to the last item.
 
         Attributes:
-            current (dict): Updated to point to the last node in the traversal.
+            current (dict): Updated to point to the last item in the traversal.
             path (list): Updated to reflect the new traversal path.
 
         Example:
@@ -580,15 +580,40 @@ class DictTraversal(dict):
         _, path = self.get_parent_item_and_path()
         return path
 
-    def get_parent_item_and_path(self):
+    def set_parent_item_as_current(self):
+        """
+        Sets the parent item in the traversal as the current item from the current item perspective.
+
+        Returns:
+            self: Returns the DictTraversal object itself, pointing to the parent item.
+
+        Attributes:
+            current (dict): Updated to point to the parent item in the traversal.
+            path (list): Updated to reflect the new traversal path.
+
+        Example:
+            ```python
+            +++traversal  # Grandchild 1
+            traversal.set_parent_item_as_current()
+            print(traversal)  # Output: {'title': 'Child 2'}
+            ```
+        """
+        self.current, self.path = self.get_parent_item_and_path(with_children=True)
+        return self
+
+    def get_parent_item_and_path(self, with_children=False):
         """
         Retrieves both the parent item and the path to the parent of the current item in the traversal.
 
+        Parameters:
+            with_children (bool, optional): If True, return the whole traversal tree, not only siblings without children.
+
         Returns:
-            tuple: A tuple containing the parent item (without its children) and the path to the parent.
+            tuple: A tuple containing the parent item (with or without its children) and the path to the parent.
 
         Note:
-            - Returns (None, []) if the current item is the root.
+            - Returns `(None, [])` if the current item is the root.
+            - Beware to set `self.current` to None since it is expected always to be a dictionary - either a root or subitem.
 
         Example:
             ```python
@@ -601,7 +626,7 @@ class DictTraversal(dict):
             for i in self.path[:-1]:
                 items = item.get(self.children_field, [])
                 item = items[i]
-            return self._without_children(item.items()), self.path[:-1]
+            return item if with_children else self._without_children(item.items()), self.path[:-1]
         return None, []
 
     def move_to_next_item(self, sibling_only=False):
@@ -612,7 +637,7 @@ class DictTraversal(dict):
             sibling_only (bool, optional): If True, moves only among siblings.
 
         Returns:
-            self: Returns the DictTraversal object itself, pointing to the next node.
+            self: Returns the DictTraversal object itself, pointing to the next item.
 
         Behavior:
             - Moves the traversal to the next item relative to the current item.
@@ -620,7 +645,7 @@ class DictTraversal(dict):
             - Will start over beginning after reaching the end.
 
         Attributes:
-            current (dict): Updated to point to the next node in the traversal.
+            current (dict): Updated to point to the next item in the traversal.
             path (list): Updated to reflect the new traversal path.
 
         Example:
@@ -758,21 +783,21 @@ class DictTraversal(dict):
 
     def count_children(self, sibling_only=False):
         """
-        Counts the number of child nodes in the current traversal context.
+        Counts the number of child items in the current traversal context.
 
         Behavior:
-            - If `sibling_only` is True, counts only the immediate children of the current node.
-            - If `sibling_only` is False, counts all descendants of the current node recursively.
+            - If `sibling_only` is True, counts only the immediate children of the current item.
+            - If `sibling_only` is False, counts all descendants of the current item recursively.
             - Utilizes a private recursive function `_` for counting when `sibling_only` is False.
 
         Parameters:
             sibling_only (bool): Whether to count only immediate children. Default is False.
 
         Returns:
-            int: The count of child nodes based on the `sibling_only` parameter.
+            int: The count of child items based on the `sibling_only` parameter.
 
         Attributes:
-            current (dict): The current node in the traversal.
+            current (dict): The current item in the traversal.
             children_field (str): The key used to identify children in the dictionary.
 
         Note:
@@ -798,22 +823,23 @@ class DictTraversal(dict):
             return count
         return _(that.get(self.children_field, []))
 
-    def add_child(self, **kwargs):
+    def add_child(self, *idx, **kwargs):
         """
-        Adds a new child node to the current node's children.
+        Adds a new child item to the current item's children.
 
         Behavior:
-            - Adds a new child node with the given keyword arguments to the current node's children list.
+            - Adds a new child item with the given keyword arguments to the current item's children list.
             - Initializes the children list if it doesn't exist.
 
         Parameters:
-            **kwargs: Arbitrary keyword arguments to define the new child node.
+            *idx: Integer arguments to define the path to the subitems/children, in which to add the item.
+            **kwargs: Arbitrary keyword arguments to define the new child item.
 
         Returns:
             self: Returns the `DictTraversal` object for method chaining.
 
         Attributes:
-            current (dict): The current node in the traversal, updated with the new child.
+            current (dict): The current item in the traversal, updated with the new child.
 
         Example:
             ```python
@@ -823,26 +849,38 @@ class DictTraversal(dict):
         """
         if not self.children_field in self.current:
             self.current[self.children_field] = []
-        self.current[self.children_field].append(kwargs)
+        if idx and (isinstance(idx, list) or isinstance(idx, tuple)):
+            # In case the first item is a list/tuple,
+            # lets take it as a path to the children
+            if isinstance(idx[0], list) or isinstance(idx[0], tuple):
+                idx = idx[0]
+            item = self.current[self.children_field]
+            for i in idx:
+                if not self.children_field in item[i]:
+                    item[i][self.children_field] = []
+                item = item[i][self.children_field]
+            item.append(kwargs)
+        else:
+            self.current[self.children_field].append(kwargs)
         return self
 
     def insert_child(self, idx, **kwargs):
         """
-        Inserts a new child node at a specific index in the current node's children.
+        Inserts a new child item at a specific index in the current item's children.
 
         Behavior:
-            - Inserts a new child node with the given keyword arguments at the specified index.
+            - Inserts a new child item with the given keyword arguments at the specified index.
             - Initializes the children list if it doesn't exist.
 
         Parameters:
-            idx (int): The index at which to insert the new child.
-            **kwargs: Arbitrary keyword arguments to define the new child node.
+            idx (int, list, tuple): The index at which to insert the new child. Can be a list or tuple of indices, which points to the deeper hierarchy of children.
+            **kwargs: Arbitrary keyword arguments to define the new child item.
 
         Returns:
             self: Returns the `DictTraversal` object for method chaining.
 
         Attributes:
-            current (dict): The current node in the traversal, updated with the new child.
+            current (dict): The current item in the traversal, updated with the new child.
 
         Example:
             ```python
@@ -852,27 +890,32 @@ class DictTraversal(dict):
         """
         if not self.children_field in self.current:
             self.current[self.children_field] = [kwargs]
+        elif isinstance(idx, list) or isinstance(idx, tuple):
+            item = self.current[self.children_field]
+            for i in idx[:-1]:
+                item = item[i][self.children_field]
+            item.insert(idx[-1], kwargs)
         else:
             self.current[self.children_field].insert(idx, kwargs)
         return self
 
     def replace_child(self, idx, **kwargs):
         """
-        Replaces an existing child node at a specific index in the current node's children.
+        Replaces an existing child item at a specific index in the current item's children.
 
         Behavior:
-            - Replaces the child node at the specified index with a new node defined by the keyword arguments.
+            - Replaces the child item at the specified index with a new item defined by the keyword arguments.
             - Initializes the children list if it doesn't exist.
 
         Parameters:
-            idx (int): The index of the child to replace.
-            **kwargs: Arbitrary keyword arguments to define the new child node.
+            idx (int, list, tuple): The index of the child to replace. Can be a list or tuple of indices, which points to the deeper hierarchy of children.
+            **kwargs: Arbitrary keyword arguments to define the new child item.
 
         Returns:
             self: Returns the `DictTraversal` object for method chaining.
 
         Attributes:
-            current (dict): The current node in the traversal, updated with the new child.
+            current (dict): The current item in the traversal, updated with the new child.
 
         Example:
             ```python
@@ -882,16 +925,21 @@ class DictTraversal(dict):
         """
         if not self.children_field in self.current:
             self.current[self.children_field] = [kwargs]
+        elif isinstance(idx, list) or isinstance(idx, tuple):
+            item = self.current[self.children_field]
+            for i in idx[:-1]:
+                item = item[i][self.children_field]
+            item[idx[-1]] = kwargs
         else:
             self.current[self.children_field][idx] = kwargs
         return self
 
     def modify(self, key=None, value=None, **kwargs):
         """
-        Modifies the current node's attributes.
+        Modifies the current item's attributes.
 
         Behavior:
-            - Updates the current node's attributes based on the provided key-value pairs.
+            - Updates the current item's attributes based on the provided key-value pairs.
             - If `key` and `value` are provided, updates that specific attribute.
             - If `kwargs` are provided, updates multiple attributes.
 
@@ -904,7 +952,7 @@ class DictTraversal(dict):
             self: Returns the `DictTraversal` object for method chaining.
 
         Attributes:
-            current (dict): The current node in the traversal, updated with the new attributes.
+            current (dict): The current item in the traversal, updated with the new attributes.
 
         Example:
             ```python
@@ -923,9 +971,9 @@ class DictTraversal(dict):
         Retrieves an item based on the given index.
 
         Behavior:
-            - If index is an int or slice, retrieves child nodes from the current node.
+            - If index is an int or slice, retrieves child items from the current item.
             - If index is a tuple or list, traverses the nested children to retrieve the item.
-            - If index is a string, retrieves the value of the corresponding attribute in the current node.
+            - If index is a string, retrieves the value of the corresponding attribute in the current item.
 
         Parameters:
             idx (int, slice, tuple, list, str): The index to retrieve the item.
@@ -938,15 +986,15 @@ class DictTraversal(dict):
             ValueError: If index type is not supported.
 
         Attributes:
-            current (dict): The current node in the traversal.
+            current (dict): The current item in the traversal.
             children_field (str): The key used to identify children in the dictionary.
 
         Example:
             ```python
-            item = traversal[0]  # Retrieves the first child of the current node
-            item = traversal[(0, 0)]  # Retrieves the first child of the first child of the current node
-            items = traversal[1:2]  # Retrieves the second and third children of the current node
-            item = traversal['name']  # Retrieves the name attribute of the current node
+            item = traversal[0]  # Retrieves the first child of the current item
+            item = traversal[(0, 0)]  # Retrieves the first child of the first child of the current item
+            items = traversal[1:2]  # Retrieves the second and third children of the current item
+            item = traversal['name']  # Retrieves the name attribute of the current item
             ```
         """
         that = self.current
@@ -973,9 +1021,9 @@ class DictTraversal(dict):
         Deletes an item based on the given index.
 
         Behavior:
-            - If index is an int or slice, deletes child nodes from the current node.
+            - If index is an int or slice, deletes child items from the current item.
             - If index is a tuple or list, traverses the nested children to delete the item.
-            - If index is a string, deletes the corresponding attribute in the current node.
+            - If index is a string, deletes the corresponding attribute in the current item.
 
         Parameters:
             idx (int, slice, tuple, list, str): The index to delete the item.
@@ -985,14 +1033,14 @@ class DictTraversal(dict):
             ValueError: If index type is not supported.
 
         Attributes:
-            current (dict): The current node in the traversal, updated after deletion.
+            current (dict): The current item in the traversal, updated after deletion.
 
         Example:
             ```python
-            del obj[0]  # Deletes the first child of the current node
-            del traversal[(0, 0)]  # Deleted the first child of the first child of the current node
-            del traversal[1:2]  # Deleted the second and third children of the current node
-            del obj['name']  # Deletes the name attribute of the current node
+            del obj[0]  # Deletes the first child of the current item
+            del traversal[(0, 0)]  # Deleted the first child of the first child of the current item
+            del traversal[1:2]  # Deleted the second and third children of the current item
+            del obj['name']  # Deletes the name attribute of the current item
             ```
         """
         that = self.current
@@ -1054,15 +1102,15 @@ class DictTraversal(dict):
 
     def __len__(self):
         """
-        Returns the total number of children nodes relative to the root node, excluding the root itself.
+        Returns the total number of children items relative to the root item, excluding the root itself.
         Can also be used with slicing `len(traversal[:])` to get the number of siblings. In that case,
             count is actually retrieved by __getitem__ from the children.
 
         Returns:
-            int: The total number of children nodes or siblings, depending on usage.
+            int: The total number of children items or siblings, depending on usage.
 
         Note:
-            - This method operates relative to the root node and delegates to the count_children method to get the count.
+            - This method operates relative to the root item and delegates to the count_children method to get the count.
 
         Example:
             ```python
@@ -1074,7 +1122,7 @@ class DictTraversal(dict):
 
     def max_depth(self):
         """
-        Returns the maximum depth of the traversal tree of the current node.
+        Returns the maximum depth of the traversal tree of the current item.
 
         Returns:
             int: The maximum depth of the traversal tree.
@@ -1168,20 +1216,20 @@ class DictTraversal(dict):
 
     def find_paths(self, label_field, titles):
         """
-        Locate nodes by matching their titles to a list of specified field values.
+        Locate items by matching their titles to a list of specified field values.
 
         Parameters:
-            label_field (str): Field name to be used as label of each node. Default is None.
-            titles (list or str): Field values to match against node titles. Can be a single string or a list of strings.
+            label_field (str): Field name to be used as label of each item. Default is None.
+            titles (list or str): Field values to match against item titles. Can be a single string or a list of strings.
 
         Returns:
-            list: A list of tuples, each containing a node and its path that matches the field values.
+            list: A list of tuples, each containing a item and its path that matches the field values.
 
         Behavior:
             - Converts `titles` to a list if it's a single string.
-            - Initializes an empty list `results` to store matching nodes and their paths.
-            - Defines a recursive function `_` to search for nodes with matching titles.
-            - Calls `_` starting from the current node's subnodes, passing the list of remaining titles to match.
+            - Initializes an empty list `results` to store matching items and their paths.
+            - Defines a recursive function `_` to search for items with matching titles.
+            - Calls `_` starting from the current item's subitems, passing the list of remaining titles to match.
             - Appends matching items and their paths to `results`. Items in the result list do not contain childrens.
 
         Example:
@@ -1246,7 +1294,7 @@ class DictTraversal(dict):
         Recursively print the tree from the relative current item in a formatted manner.
 
         Parameters:
-            label_field (str): Field name to be used as label of each node. Default is None.
+            label_field (str): Field name to be used as label of each item. Default is None.
 
         Behavior:
             - Prints the string representation of the traversal tree, indented by the specified amount.
@@ -1279,19 +1327,19 @@ class DictTraversal(dict):
         Generates a string representation of the traversal tree.
 
         Behavior:
-            - If `from_root` is True, starts the visualization from the root node.
-            - If `label_field` is provided, uses it as the label for each node.
-            - Marks the current node with an asterisk (*).
+            - If `from_root` is True, starts the visualization from the root item.
+            - If `label_field` is provided, uses it as the label for each item.
+            - Marks the current item with an asterisk (*).
 
         Parameters:
-            label_field (str, optional): Field name to be used as the label for each node. Default is None.
-            from_root (bool): Whether to start the visualization from the root node. Default is False.
+            label_field (str, optional): Field name to be used as the label for each item. Default is None.
+            from_root (bool): Whether to start the visualization from the root item. Default is False.
 
         Returns:
             str: A string representing the traversal tree, with indentation to indicate nesting levels.
 
         Attributes:
-            current (dict): The current node in the traversal.
+            current (dict): The current item in the traversal.
             children_field (str): The key used to identify children in the dictionary.
 
         Example:
@@ -1503,7 +1551,7 @@ def last(traversal):
     Example:
         ```python
         last(traversal)  # Returns: {'title': 'Child 3'}
-        # Calling the end node, same will be returned
+        # Calling the end item, same will be returned
         last(traversal)  # Returns: {'title': 'Child 3'}
         ```
     """

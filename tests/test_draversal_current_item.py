@@ -97,6 +97,38 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         ++self.traversal  # Child 2
         self.assertEqual(self.traversal["title"], 'Child 2')
 
+    def test_current_item_add_child(self):
+        self.assertEqual(len(next(next(first(self.traversal)))[:]), 0)
+        root(self.traversal)
+        # Add Grandgrandchild X under Child 2 -> Grandchild 1
+        self.traversal.add_child([1,0], title='Grandgrandchild X')
+        self.assertEqual(next(next(next(first(self.traversal))))['title'], 'Grandgrandchild X')
+        self.assertEqual(len(next(next(first(self.traversal)))[:]), 1)
+
+    def test_current_item_insert_child(self):
+        root(self.traversal)
+        self.assertEqual(len(self.traversal[:]), 3)
+        # Insert Child X as the first sibling under root
+        self.traversal.insert_child(0, title='Child X')
+        self.assertEqual(len(self.traversal[:]), 4)
+        self.assertEqual(first(self.traversal)['title'], 'Child X')
+    
+    def test_current_item_insert_child_indices(self):
+        self.assertEqual(len(next(first(self.traversal))[:]), 2)
+        root(self.traversal)
+        # Add Grandchild X under Child 2
+        self.traversal.insert_child([1,0], title='Grandchild X')
+        self.assertEqual(next(next(first(self.traversal)))['title'], 'Grandchild X')
+        self.assertEqual(len(next(first(self.traversal))[:]), 3)
+    
+    def test_current_item_replace_child(self):
+        self.assertEqual(len(next(first(self.traversal))[:]), 2)
+        root(self.traversal)
+        # Replace Grandchild 1 with Grandchild X under Child 2
+        self.traversal.replace_child([1,0], title='Grandchild X')
+        self.assertEqual(next(next(first(self.traversal)))['title'], 'Grandchild X')
+        self.assertEqual(len(next(first(self.traversal))[:]), 2)
+
 
 class TestDictTraversalCurrentItemNewRoot(TestDictTraversalCurrentItem):
 
