@@ -893,6 +893,8 @@ class DictTraversal(dict):
         elif isinstance(idx, list) or isinstance(idx, tuple):
             item = self.current[self.children_field]
             for i in idx[:-1]:
+                if not self.children_field in item[i]:
+                    item[i][self.children_field] = []
                 item = item[i][self.children_field]
             item.insert(idx[-1], kwargs)
         else:
@@ -928,6 +930,8 @@ class DictTraversal(dict):
         elif isinstance(idx, list) or isinstance(idx, tuple):
             item = self.current[self.children_field]
             for i in idx[:-1]:
+                if not self.children_field in item[i]:
+                    item[i][self.children_field] = []
                 item = item[i][self.children_field]
             item[idx[-1]] = kwargs
         else:
@@ -1253,7 +1257,7 @@ class DictTraversal(dict):
                         return _(subitems, remaining_titles[1:], local_path)
         _(self.current.get(self.children_field, []), titles)
         return results
-    
+
     def search(self, query, label_field):
         """
         Search for items whose label match a given query.
