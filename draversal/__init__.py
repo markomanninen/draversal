@@ -47,7 +47,7 @@ class DictTraversal(dict):
             # last function brings to the last item in the list
             str(last(traversal)),  # {'title': 'Child 3'}
             # root function brings to the root, from which the traversal starts.
-            # next will be first item contra to iter which will give root as a first item only after callind next
+            # next will be first item contra to iter which will give root as a first item only after calling next
             str(root(traversal))  # {'title': 'root'}
         )
         ```
