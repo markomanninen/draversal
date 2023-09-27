@@ -45,20 +45,20 @@ class DictTraversal(dict):
             # Iter function brings to the root, from which the traversal starts,
             # but actually the first items has not been reached yet
             print(iter(traversal)),  # Outputs: {'title': 'root'}
-            # Next function forwards iterator to the first/next item.
+            # Next function forwards iterator to the first/next item. In this case it is the root.
             # It yields StopIteration error when the end of the tree has been reached.
-            print(next(traversal)),  # Outputs: {'title': 'Child 1'}
+            print(next(traversal)),  # Outputs: {'title': 'root'}
             # Prev function works similar way and it yields StopIteration error,
             # when the beginning of the tree has been reached.
-            print(prev(next(next(traversal)))),  # Outputs: {'title': 'Child 2'}
+            print(prev(next(next(traversal)))),  # Outputs: {'title': 'Child 1'}
             # First function brings to the first item in the list (after root).
             print(first(traversal)),  # Outputs: {'title': 'Child 1'}
-            # Last function brings to the last item in the list.
-            print(last(traversal)),  # Outputs: {'title': 'Child 3'}
             # Root function brings to the root, from which the traversal starts.
             # Next item will be first item contra to iter which will give root as
             # the first item only after calling next.
             print(root(traversal))  # Outputs: {'title': 'root'}
+            # Last function brings to the last item in the list.
+            print(last(traversal)),  # Outputs: {'title': 'Child 3'}
         )
         ```
 
