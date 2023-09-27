@@ -28,6 +28,13 @@ class DictTraversal(dict):
             ]
         }
         traversal = DictTraversal(data, children_field=children_field)
+        # If you want to validate that data has expected and required fields
+        # with a correct nested structure, you can use validate_data function:
+        try:
+            validate_data(data, children_field, 'title')
+            print('Given data is valid.')
+        except ValueError as e:
+            print(f'Given data is invalid. {e}')
         ```
 
     After initialization, a certain methods are available for traversing and modifying the nested tree structure.
@@ -35,26 +42,34 @@ class DictTraversal(dict):
     Example:
         ```python
         (
-            # iter brings to the root, from which the traversal starts, but actually the first items has not been reached yet
-            str(iter(traversal)),  # {'title': 'root'}
-            # next forwards iterator to the first/next item.
-            # it yields StopIteration error when the end of the tree has been reached
-            str(next(traversal)),  # {'title': 'Child 1'}
-            # prev works similar way and it yields StopIteration error when the beginning of the tree has been reached
-            str(prev(next(next(traversal)))),  # {'title': 'Child 2'}
-            # first function brings to the first item in the list (after root)
-            str(first(traversal)),  # {'title': 'Child 1'}
-            # last function brings to the last item in the list
-            str(last(traversal)),  # {'title': 'Child 3'}
-            # root function brings to the root, from which the traversal starts.
-            # next will be first item contra to iter which will give root as a first item only after calling next
-            str(root(traversal))  # {'title': 'root'}
+            # Iter function brings to the root, from which the traversal starts,
+            # but actually the first items has not been reached yet
+            print(iter(traversal)),  # Outputs: {'title': 'root'}
+            # Next function forwards iterator to the first/next item.
+            # It yields StopIteration error when the end of the tree has been reached.
+            print(next(traversal)),  # Outputs: {'title': 'Child 1'}
+            # Prev function works similar way and it yields StopIteration error,
+            # when the beginning of the tree has been reached.
+            print(prev(next(next(traversal)))),  # Outputs: {'title': 'Child 2'}
+            # First function brings to the first item in the list (after root).
+            print(first(traversal)),  # Outputs: {'title': 'Child 1'}
+            # Last function brings to the last item in the list.
+            print(last(traversal)),  # Outputs: {'title': 'Child 3'}
+            # Root function brings to the root, from which the traversal starts.
+            # Next item will be first item contra to iter which will give root as
+            # the first item only after calling next.
+            print(root(traversal))  # Outputs: {'title': 'root'}
         )
         ```
 
     Root is a special place in a tree. When `DictTraversal` has been initialized, or `iter`/`root` functions are called,
     root is a starting point of the tree, which contains the first siblings. To traverse to the first sibling,
     either next, first, or move_to_next_item methods must be called.
+
+    There are a plenty of methods that can be used to further navigate, search, add/modify/remove items and visualize the tree.
+    This is a short list to them. Please refer to the method docs for further information.
+    
+    ...
     """
 
     def __init__(self, *args, children_field=None, **kwargs):
