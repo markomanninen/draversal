@@ -69,7 +69,51 @@ class DictTraversal(dict):
     There are a plenty of methods that can be used to further navigate, search, add/modify/remove items and visualize the tree.
     This is a short list to them. Please refer to the method docs for further information.
     
-    ...
+    ```
+    demo() -> DictTraversal
+    first(traversal) -> self
+    last(traversal) -> self
+    prev(traversal) -> self/StopIteration
+    root(traversal) -> self
+    validate_data(data, children_field, label_field=None) -> None/ValueError
+    __delitem__(idx) -> self/IndexError/ValueError
+    __getitem__(idx) -> any/IndexError/ValueError
+    __init__(*args, children_field=None, **kwargs) -> DictTraversal
+    __invert__() -> self
+    __iter__() -> self
+    __len__() -> int
+    __neg__() -> self
+    __next__() -> self/StopIteration
+    __pos__() -> self
+    __repr__() -> str
+    add_child(*idx, **kwargs) -> self
+    children(sibling_only=False) -> list
+    count_children(sibling_only=False) -> int
+    find_paths(label_field, titles) -> list(tuple(dict, list),...)
+    get_last_item(sibling_only=False) -> dict
+    get_last_item_and_path(sibling_only=False) -> tuple(dict, list)
+    get_last_path(sibling_only=False) -> list
+    get_next_item_and_path(sibling_only=False) -> tuple(dict, list)
+    get_parent_item() -> dict
+    get_parent_item_and_path(with_children=False) -> tuple(dict, list)
+    get_parent_path() -> list
+    get_previous_item_and_path(sibling_only=False) -> tuple(dict, list)
+    insert_child(idx, **kwargs) -> self
+    @contextmanager inverted() -> DictTraversal
+    max_depth() -> int
+    modify(key=None, value=None, **kwargs) -> self
+    move_to_next_item(sibling_only=False) -> self
+    move_to_prev_item(sibling_only=False) -> self
+    @contextmanager new_root(merge=False) -> DictTraversal
+    peek_next(steps=1) -> dict
+    peek_prev(steps=1) -> dict
+    pretty_print(label_field=None) -> None
+    replace_child(idx, **kwargs) -> self
+    search(query, label_field) -> list(tuple(dict, list),...)
+    set_last_item_as_current(sibling_only=False) -> self
+    set_parent_item_as_current() -> self
+    visualize(label_field=None, from_root=False) -> str
+    ```
     """
 
     def __init__(self, *args, children_field=None, **kwargs):
@@ -103,6 +147,11 @@ class DictTraversal(dict):
 
         Note:
             - Keyword arguments will override arguments in `*args` if overlapping keys are found.
+        
+        Example:
+            ```python
+            traversal = DictTraversal(data, children_field='children')
+            ```
         """
         super(DictTraversal, self).__init__(*args, **kwargs)
         if not children_field or not isinstance(children_field, str):
@@ -1022,7 +1071,7 @@ class DictTraversal(dict):
                 return that[self.children_field][idx]
             else:
                 return {}
-        if isinstance(idx, tuple) or  isinstance(idx, list):
+        if isinstance(idx, tuple) or isinstance(idx, list):
             item = that
             for i in idx:
                 if self.children_field in item:
@@ -1083,6 +1132,7 @@ class DictTraversal(dict):
                 del that[idx]
         else:
             raise ValueError('Index must be one of the types: int, splice, tuple, list, or str.')
+        return self
 
     def _without_children(self, items):
         """
