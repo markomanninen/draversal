@@ -69,6 +69,34 @@ After initialization, a certain methods are available for traversing and modifyi
 
 Root is a special place in a tree. When `DictTraversal` has been initialized, or `iter`/`root` functions are called, root is a starting point of the tree, which contains the first siblings. To traverse to the first sibling, either next, first, or move_to_next_item methods must be called.
 
+__Other operations__
+
+```python
+# Count the number of all children for the current node
+print(traversal.count_children())  # Outputs: 6
+
+# Get the last item in the tree
+print(traversal.get_last_item())  # Outputs: {'title': 'Child 3'}
+
+# Search for nodes with a specific title
+result = traversal.search('Child 1', label_field='title')
+print(result)  # Outputs: [({'title': 'Child 1'}, [0]), ({'title': 'Grandchild 1'}, [1, 0])]
+
+# Add a new child to the current node
+traversal.add_child(title='New Child')
+
+# Visualize the tree structure
+print(traversal.visualize(label_field='title'))  # Outputs:
+# root*
+# ├── Child 1
+# ├── Child 2
+# │   ├── Grandchild 1
+# │   └── Grandchild 2
+# │       └── Grandgrandchild
+# ├── Child 3
+# └── New Child
+```
+
 There are a plenty of methods that can be used to further navigate, search, add/modify/remove items and visualize the tree. This is a short list to them. Please refer to the method docs for further information.
 
 ```
