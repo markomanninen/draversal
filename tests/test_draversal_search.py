@@ -38,3 +38,10 @@ class TestDictTraversalInverted(unittest.TestCase):
         dsq = DictSearchQuery(query)
         data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
         self.assertEquals(dsq.execute(data), {'a.b.c': 1})
+
+    def test_custom_function(self):
+        query = DictSearchQuery({'*title$func': lambda d, f: d[f].lower().startswith('child')})
+        self.assertEquals(
+            self.traversal.search(query),
+            [({'title': 'Child 1'}, [0]), ({'title': 'Child 2'}, [1]), ({'title': 'Child 3'}, [2])]
+        )
