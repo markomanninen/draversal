@@ -23,7 +23,7 @@ def flatten_dict(data, field_separator='.', list_index_indicator='#%s'):
         ```python
         nested_dict = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
         flat_dict = flatten_dict(nested_dict)
-        # Output: {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3}
+        print(flat_dict)  # Outputs: {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3}
         ```
     """
     def _(data, parent_key=''):
@@ -60,18 +60,18 @@ def reconstruct_item(query_key, item, field_separator='.', list_index_indicator=
 
     Example:
         ```python
-        flat_dict = {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3}
-        item = reconstruct_item('a.b.c', flat_dict)
-        # Output: 1
+        data = {'a': {'b': {'c': 1}}, 'd': [{'e': 2}, {'f': 3}]}
+        print(reconstruct_item('a.b.c', data))  # Outputs: 1
+        print(reconstruct_item('d#0.e', data))  # Outputs: 2
+        print(reconstruct_item('d#1', data))  # Outputs: {'f': 3}
         ```
     """
     for key in query_key.split(field_separator)[:-1]:
         key_parts = key.split(list_index_indicator)
         key_main = key_parts[0]
-        idx = int(key_parts[1]) if len(key_main) > 1 else None
         item = item[key_main]
-        if idx is not None:
-            item = item[idx]
+        if len(key_main) > 1:
+            item = item[int(key_parts[1])]
     return item
 
 
@@ -105,23 +105,26 @@ class DictSearchQuery:
         query = {'a.b.c': 1}
         dsq = DictSearchQuery(query)
         result = dsq.execute(data)
-        # Output: {'a.b.c': 1}
+        print(result)  # Outputs: {'a.b.c': 1}
         ```
     """
 
     OPERATOR_MAP = {
-        'eq': op.eq,
-        'ge': op.ge,
-        'gt': op.gt,
-        'le': op.le,
-        'lt': op.lt,
-        'ne': op.ne,
-        'func': lambda v, q: q(v),
-        'contains': op.contains,
-        'is': lambda v, q: v is q,
-        'in': lambda v, q: v in q,
-        'type': lambda v, q: type(v).__name__ == str(q),
-        'exists': lambda v, q: True,
+        'eq': op.eq,  # Equals
+        'ge': op.ge,  # Greater or equal
+        'gt': op.gt,  # Greater than
+        'le': op.le,  # Less or equal
+        'lt': op.lt,  # Less than
+        'ne': op.ne,  # Not equals
+        'contains': op.contains,  # List contains given value
+        'is': lambda v, q: v is q,  # Value is same, typewise
+        'in': lambda v, q: v in q,  # Value is in list
+        'exists': lambda _, __: True,  # Field-in-data check has already been done in operate function
+        'type': lambda v, q: type(v).__name__ == str(q),  # Type of value matches the given type (in string format)
+        # Pass data to function for even more complex matches, for instance parent field check.
+        # q=function (query) with two arguments: d=data, f=field
+        'func': lambda q, d, f: q(d, f),
+        # Regular expression with case insensitive support
         'regex': lambda v, q: re.match((re.compile(q, re.IGNORECASE) if q.startswith('(?i)') else re.compile(q)) if not isinstance(q, re.Pattern) else q, v)
     }
 
@@ -158,7 +161,7 @@ class DictSearchQuery:
             - Uses the operator map to find the appropriate Python operator function.
             - Applies the operator function to the field and query value.
         """
-        return field in data and operator in DictSearchQuery.OPERATOR_MAP and DictSearchQuery.OPERATOR_MAP[operator](data[field], query)
+        return field in data and operator in DictSearchQuery.OPERATOR_MAP and DictSearchQuery.OPERATOR_MAP[operator](*((query, data, field) if operator == 'func' else (data[field], query)))
 
     def is_regex(self, query_key):
         """
@@ -175,8 +178,7 @@ class DictSearchQuery:
 
         Example:
             ```python
-            is_regex("/abc/")
-            # Output: True
+            is_regex("/abc/")  # Results: True
             ```
         """
         return query_key.startswith("/") and query_key.endswith("/")
@@ -196,8 +198,7 @@ class DictSearchQuery:
 
         Example:
             ```python
-            is_wildcard("a*b?")
-            # Output: True
+            is_wildcard("a*b?")  # Results: True
             ```
         """
         return '?' in query_key or '*' in query_key or ('[' in query_key and ']' in query_key)
@@ -219,8 +220,7 @@ class DictSearchQuery:
 
         Example:
             ```python
-            match_regex("/a*b/", "aab")
-            # Output: True
+            match_regex("/a*b/", "aab")  # Results: True
             ```
         """
         return self.support_regex and self.is_regex(query_key) and re.compile(query_key.strip("/")).match(new_key)
@@ -243,8 +243,7 @@ class DictSearchQuery:
 
         Example:
             ```python
-            match_wildcards("a*b?", "aab")
-            # Output: True
+            match_wildcards("a?b", "aab")  # Results: True
             ```
         """
         return self.support_wildcards and self.is_wildcard(query_key) and re.match(translate(query_key), new_key)
@@ -266,8 +265,9 @@ class DictSearchQuery:
 
         Example:
             ```python
-            match("a*b?", "aab")
-            # Output: True
+            match("a?b", "aab")  # Results: True
+            match("/a*b/", "aab")  # Results: True
+            match("aab", "aab")  # Results: True
             ```
         """
         return (self.match_regex(query_key, new_key) or
@@ -292,11 +292,10 @@ class DictSearchQuery:
 
         Example:
             ```python
-            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
-            query = {'a.b.c': 1}
+            query = {'*': 1}
             dsq = DictSearchQuery(query)
-            result = dsq.execute(data)
-            # Output: {'a.b.c': 1}
+            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
+            dsq.execute(data)  # Results: {'a.b.c': 1}
             ```
         """
         query_keys = set(self.query.keys())
