@@ -7,7 +7,7 @@ class TestDictTraversalInverted(unittest.TestCase):
     def setUp(self):
         self.traversal = demo()
         self.data = {k: v for k, v in self.traversal.items()}
-    
+
     def test_inverted_context_for_iterator(self):
         with self.traversal.inverted():
             items = [item["title"] for item in self.traversal]
@@ -43,7 +43,7 @@ class TestDictTraversalInverted(unittest.TestCase):
         self.assertEqual(len(items), 7)
         self.assertEqual(items[0], "root")
         self.assertEqual(items[-1], "Child 3")
-    
+
     def test_inverted_context_and_tilde_for_iterator(self):
         with self.traversal.inverted():
             # Inverted
@@ -80,7 +80,7 @@ class TestDictTraversalInverted(unittest.TestCase):
         with self.traversal.inverted():
             self.assertEqual(self.traversal.peek_prev(1)["title"], "Child 1")
         self.assertEqual(self.traversal.peek_prev(1)["title"], "Child 3")
-    
+
     def test_first_last_root(self):
         self.assertEqual(first(self.traversal).current["title"], "Child 1")
         with self.traversal.inverted():

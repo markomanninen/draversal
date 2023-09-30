@@ -8,16 +8,16 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
     def setUp(self):
         self.traversal = demo()
         self.data = {k: v for k, v in self.traversal.items()}
-    
+
     def test_current_item_pretty_print(self):
         ++self.traversal  # Child 2
         self.traversal.pretty_print("title")
-    
+
     def test_current_item_visualize(self):
         ++self.traversal
         self.assertTrue(self.traversal.visualize("title").split("\n")[0], "Child 2")
         self.assertTrue(self.traversal.visualize("title").split("\n")[3], "    └── Grandgrandchild")
-    
+
     def test_current_item_find_paths(self):
         titles = ["Child 2", "Grandchild 2", "Grandgrandchild"]
         a = self.traversal.find_paths("title", titles)
@@ -31,7 +31,7 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         self.assertTrue(a[0][1] == [1, 1, 0])
         # c is from Child 2
         self.assertTrue(c[0][1] == [1, 0])
-    
+
     def test_current_item_search(self):
         result1 = self.traversal.search('Grandgrandchild', 'title')  # Returns: [({'title': 'Grandgrandchild'}, [1, 1, 0])]
         result2 = self.traversal.search(re.compile(r'Grandchild [0-9]+'), 'title')  # Returns: [(Grandchild 1, [1, 0]), (Grandchild 2, [1, 1])]
@@ -44,7 +44,7 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         ++self.traversal  # Child 2
         # counted from Child 2
         self.assertEqual(self.traversal.max_depth(), 2)
-    
+
     def test_current_item_cound_children(self):
         # counted from root, excluding root
         self.assertEqual(len(self.traversal), 6)
@@ -59,12 +59,12 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         # only siblings
         self.assertEqual(len(self.traversal[:]), 2)
         self.assertEqual(self.traversal.count_children(True), 2)
-    
+
     def test_current_item_children(self):
         self.assertEqual(len(self.traversal.children()), 3)
         ++self.traversal  # Child 2
         self.assertEqual(len(self.traversal.children()), 2)
-    
+
     def test_current_item_get_last_item_and_path(self):
         # get_last_item, get_last_path use the same method
         self.assertEqual(self.traversal.get_last_item_and_path(), ({'title': 'Child 3'}, [2]))
@@ -112,7 +112,7 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         self.traversal.insert_child(0, title='Child X')
         self.assertEqual(len(self.traversal[:]), 4)
         self.assertEqual(first(self.traversal)['title'], 'Child X')
-    
+
     def test_current_item_insert_child_indices(self):
         self.assertEqual(len(next(first(self.traversal))[:]), 2)
         root(self.traversal)
@@ -120,7 +120,7 @@ class TestDictTraversalCurrentItem(unittest.TestCase):
         self.traversal.insert_child([1,0], title='Grandchild X')
         self.assertEqual(next(next(first(self.traversal)))['title'], 'Grandchild X')
         self.assertEqual(len(next(first(self.traversal))[:]), 3)
-    
+
     def test_current_item_replace_child(self):
         self.assertEqual(len(next(first(self.traversal))[:]), 2)
         root(self.traversal)

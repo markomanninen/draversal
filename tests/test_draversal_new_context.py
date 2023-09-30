@@ -7,7 +7,7 @@ class TestNode(unittest.TestCase):
     def setUp(self):
         self.traversal = demo()
         self.data = {k: v for k, v in self.traversal.items()}
-    
+
     def test_new_root_context(self):
         ++self.traversal
         self.assertEqual(self.traversal.visualize("title", from_root=True).split("\n")[2], "├── Child 2*")
