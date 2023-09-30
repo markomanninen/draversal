@@ -7,13 +7,13 @@ class TestDictTraversal(unittest.TestCase):
     def setUp(self):
         self.traversal = demo()
         self.data = {k: v for k, v in self.traversal.items()}
-    
+
     def test_data_dict(self):
         self.assertEqual(self.data["title"], "root")
 
     def test_pretty_print(self):
         self.traversal.pretty_print()
-    
+
     def test_visualize(self):
         print()
         print(self.traversal.visualize(label_field="title"))
@@ -51,7 +51,7 @@ class TestDictTraversal(unittest.TestCase):
             ]
         }
         self._invalidate_function(data, 'sections', 'title')
-    
+
     def test_validate_data_function_title_not_required(self):
         data = {
             'title': 'root', 
@@ -60,11 +60,11 @@ class TestDictTraversal(unittest.TestCase):
             ]
         }
         self._validate_function(data, 'sections')
-    
+
     def test_validate_data_function_empty_data(self):
         data = {}
         self._invalidate_function(data, 'sections', 'title')
-    
+
     def test_validate_data_function_empty_data(self):
         data = {"title": "root"}
         # at least one section is required
@@ -105,19 +105,19 @@ class TestDictTraversal(unittest.TestCase):
         self.assertEqual(self.traversal.current['title'], "Child 2")
         prev(self.traversal)
         self.assertEqual(self.traversal.current['title'], "Child 1")
-    
+
     def test_root_function(self):
         self.assertEqual(root(self.traversal).current['title'], "root")
-    
+
     def test_root_first_root_next(self):
         self.assertEqual(first(root(self.traversal)), next(root(self.traversal)))
 
     def test_first_function(self):
         self.assertEqual(first(self.traversal).current['title'], "Child 1")
-    
+
     def test_last_function(self):
         self.assertEqual(last(self.traversal).current['title'], "Child 3")
-    
+
     def test_next_prev_prev_next(self):
         start = next(self.traversal)
         self.assertEqual(prev(next(start)), next(prev(start)))
@@ -180,7 +180,7 @@ class TestDictTraversal(unittest.TestCase):
             i += 1
         self.assertEqual(self.traversal.current["title"], "Child 3")
         self.assertEqual(count_roots, 3)
-    
+
     def test_for_iterator(self):
         # Note: item.__repr__ will return the root, not item title!
         items = [item["title"] for item in self.traversal]
@@ -205,20 +205,30 @@ class TestDictTraversal(unittest.TestCase):
         self.assertEqual(self.traversal.current["title"], "Child 3")
         --self.traversal
         self.assertEqual(self.traversal.current["title"], "Grandchild 2")
-    
+
     def test_get_item_root_title(self):
         self.assertEqual(self.traversal["title"], "root")
-    
+
+    def test_get_item_by_path(self):
+        self.assertEqual(self.traversal.get_item_by_path([1, 0])['title'], "Grandchild 1")
+
+    def test_set_item_by_path(self):
+        self.traversal.set_path_as_current([1, 0])
+        self.assertEqual(self.traversal.path, [1, 0])
+        self.assertEqual(self.traversal['title'], "Grandchild 1")
+        next(self.traversal)
+        self.assertEqual(self.traversal['title'], "Grandchild 2")
+
     def test_get_item_first_and_last_child(self):
         self.assertEqual(self.traversal[0], {'title': 'Child 1'})
         self.assertEqual(self.traversal[-1], {'title': 'Child 3'})
-    
+
     def test_get_item_index_path(self):
         self.assertEqual(self.traversal[1,1,0], {'title': 'Grandgrandchild'})
-    
+
     def test_get_item_item_slice(self):
         self.assertEqual(self.traversal[:1], [{'title': 'Child 1'}])
-    
+
     def test_del_item(self):
         del self.traversal[0]
         self.assertEqual(len(self.traversal[:]), 2)
@@ -235,14 +245,14 @@ class TestDictTraversal(unittest.TestCase):
         +self.traversal
         del self.traversal["title"]
         self.assertEqual(self.traversal["title"], None)
-    
+
     def test_del_item_index_path(self):
         self.assertEqual(len(self.traversal), 6)
         self.assertEqual(len(self.traversal[1,1]["sections"]), 1)
         del self.traversal[(1,1,0)]
         self.assertEqual(len(self.traversal), 5)
         self.assertEqual(len(self.traversal[1,1]["sections"]), 0)
-    
+
     def test_current_item_get_parent_item_and_path(self):
         # get_parent_path, get_parent_item use the same method
         +++self.traversal  # {'title': 'Grandchild 1'}
