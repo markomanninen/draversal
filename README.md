@@ -7,6 +7,34 @@ A package for depth-first traversal of Python dictionaries with uniform child fi
 # DOCUMENTATION WITH EXAMPLES
 
 
+# Class: `DictSearchQuery`
+
+## Description
+Provides utilities for querying nested dictionaries based on various conditions.
+
+## Attributes
+- __OPERATOR_MAP__ (dict): A mapping of query operators to Python's operator functions.
+- __query__ (dict): The query to execute against the data.
+- __support_wildcards__ (bool): Flag to enable wildcard support in queries.
+- __support_regex__ (bool): Flag to enable regular expression support in queries.
+## Behavior
+ - Initializes with a query and optional flags for supporting wildcards and regular expressions.
+ - Provides methods to match keys based on different conditions like wildcards, regular expressions, and exact matches.
+ - Executes the query on a nested dictionary and returns the matched fields.
+
+## Example
+ ```python
+ query = {'a.b.c': 1}
+ dsq = DictSearchQuery(query)
+ data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+ result = dsq.execute(data)
+ print(result)  # Outputs: {'c': 1}
+ ```
+
+---
+
+
+
 # Class: `DictTraversal`
 
 ## Description
@@ -18,132 +46,137 @@ correspond to the dictionary children list field. Optionally data can be provide
 Except from child field, all other fields are optional and the rest of the dictionary can be formed freely.
 
 ## Example
-```python
-children_field = 'sections'
-data = {
-    'title': 'root',
-    children_field: [
-        {'title': 'Child 1'},
-        {'title': 'Child 2', children_field: [
-            {'title': 'Grandchild 1'},
-            {'title': 'Grandchild 2', children_field: [
-                {'title': 'Grandgrandchild'}
-            ]}
-        ]},
-        {'title': 'Child 3'}
-    ]
-}
-traversal = DictTraversal(data, children_field=children_field)
-# If you want to validate that data has expected and required fields
-# with a correct nested structure, you can use validate_data function:
-try:
-    validate_data(data, children_field, 'title')
-    print('Given data is valid.')
-except ValueError as e:
-    print(f'Given data is invalid. {e}')
-```
+ ```python
+ children_field = 'sections'
+ data = {
+     'title': 'root',
+     children_field: [
+         {'title': 'Child 1'},
+         {'title': 'Child 2', children_field: [
+             {'title': 'Grandchild 1'},
+             {'title': 'Grandchild 2', children_field: [
+                 {'title': 'Grandgrandchild'}
+             ]}
+         ]},
+         {'title': 'Child 3'}
+     ]
+ }
+ traversal = DictTraversal(data, children_field=children_field)
+ # If you want to validate that data has expected and required fields
+ # with a correct nested structure, you can use validate_data function:
+ try:
+     validate_data(data, children_field, 'title')
+     print('Given data is valid.')
+ except ValueError as e:
+     print(f'Given data is invalid. {e}')
+ ```
 
-After initialization, a certain methods are available for traversing and modifying the nested tree structure.
+    After initialization, a certain methods are available for traversing and modifying the nested tree structure.
 
-```python
-(
-    # Iter function brings to the root, from which the traversal starts,
-    # but actually the first items has not been reached yet
-    print(iter(traversal)),  # Outputs: {'title': 'root'}
-    # Next function forwards iterator to the first/next item. In this case it is the root.
-    # It yields StopIteration error when the end of the tree has been reached.
-    print(next(traversal)),  # Outputs: {'title': 'root'}
-    # Prev function works similar way and it yields StopIteration error,
-    # when the beginning of the tree has been reached.
-    print(prev(next(next(traversal)))),  # Outputs: {'title': 'Child 1'}
-    # First function brings to the first item in the list (after root).
-    print(first(traversal)),  # Outputs: {'title': 'Child 1'}
-    # Root function brings to the root, from which the traversal starts.
-    # Next item will be first item contra to iter which will give root as
-    # the first item only after calling next.
-    print(root(traversal))  # Outputs: {'title': 'root'}
-    # Last function brings to the last item in the list.
-    print(last(traversal)),  # Outputs: {'title': 'Child 3'}
-)
-```
+ ```python
+ (
+     # Iter function brings to the root, from which the traversal starts,
+     # but actually the first items has not been reached yet
+     print(iter(traversal)),  # Outputs: {'title': 'root'}
+     # Next function forwards iterator to the first/next item. In this case it is the root.
+     # It yields StopIteration error when the end of the tree has been reached.
+     print(next(traversal)),  # Outputs: {'title': 'root'}
+     # Prev function works similar way and it yields StopIteration error,
+     # when the beginning of the tree has been reached.
+     print(prev(next(next(traversal)))),  # Outputs: {'title': 'Child 1'}
+     # First function brings to the first item in the list (after root).
+     print(first(traversal)),  # Outputs: {'title': 'Child 1'}
+     # Root function brings to the root, from which the traversal starts.
+     # Next item will be first item contra to iter which will give root as
+     # the first item only after calling next.
+     print(root(traversal))  # Outputs: {'title': 'root'}
+     # Last function brings to the last item in the list.
+     print(last(traversal)),  # Outputs: {'title': 'Child 3'}
+ )
+ ```
 
-Root is a special place in a tree. When `DictTraversal` has been initialized, or `iter`/`root` functions are called, root is a starting point of the tree, which contains the first siblings. To traverse to the first sibling, either next, first, or move_to_next_item methods must be called.
+    Root is a special place in a tree. When `DictTraversal` has been initialized, or `iter`/`root` functions are called,
+    root is a starting point of the tree, which contains the first siblings. To traverse to the first sibling,
+    either next, first, or move_to_next_item methods must be called.
 
-__Other operations__
+    __Other operations__
 
-```python
-# Count the number of all children for the current node
-print(traversal.count_children())  # Outputs: 6
+    ```python
+    # Count the number of all children for the current node
+    print(traversal.count_children())  # Outputs: 6
 
-# Get the last item in the tree
-print(traversal.get_last_item())  # Outputs: {'title': 'Child 3'}
+    # Get the last item in the tree
+    print(traversal.get_last_item())  # Outputs: {'title': 'Child 3'}
 
-# Search for nodes with a specific title
-result = traversal.search('Child 1', label_field='title')
-print(result)  # Outputs: [({'title': 'Child 1'}, [0]), ({'title': 'Grandchild 1'}, [1, 0])]
+    # Search for nodes with a specific title
+    result = traversal.search('Child 1', label_field='title')
+    print(result)  # Outputs: [({'title': 'Child 1'}, [0]), ({'title': 'Grandchild 1'}, [1, 0])]
 
-# Add a new child to the current node
-traversal.add_child(title='New Child')
+    # Add a new child to the current node
+    traversal.add_child(title='New Child')
 
-# Visualize the tree structure
-print(traversal.visualize(label_field='title'))  # Outputs:
-# root*
-# ├── Child 1
-# ├── Child 2
-# │   ├── Grandchild 1
-# │   └── Grandchild 2
-# │       └── Grandgrandchild
-# ├── Child 3
-# └── New Child
-```
+    # Visualize the tree structure
+    print(traversal.visualize(label_field='title'))  # Outputs:
+    # root*
+    # ├── Child 1
+    # ├── Child 2
+    # │   ├── Grandchild 1
+    # │   └── Grandchild 2
+    # │└── Grandgrandchild
+    # ├── Child 3
+    # └── New Child
+    ```
 
-There are a plenty of methods that can be used to further navigate, search, add/modify/remove items and visualize the tree. This is a short list to them. Please refer to the method docs for further information.
+    There are a plenty of methods that can be used to further navigate, search, add/modify/remove items and visualize the tree.
+    This is a short list to them. Please refer to the method docs for further information.
 
-```
-demo() -> DictTraversal
-first(traversal) -> self
-last(traversal) -> self
-prev(traversal) -> self/StopIteration
-root(traversal) -> self
-validate_data(data, children_field, label_field=None) -> None/ValueError
-__delitem__(idx) -> self/IndexError/ValueError
-__getitem__(idx) -> any/IndexError/ValueError
-__init__(*args, children_field=None, **kwargs) -> DictTraversal
-__invert__() -> self
-__iter__() -> self
-__len__() -> int
-__neg__() -> self
-__next__() -> self/StopIteration
-__pos__() -> self
-__repr__() -> str
-add_child(*idx, **kwargs) -> self
-children(sibling_only=False) -> list
-count_children(sibling_only=False) -> int
-find_paths(label_field, titles) -> list(tuple(dict, list),...)
-get_last_item(sibling_only=False) -> dict
-get_last_item_and_path(sibling_only=False) -> tuple(dict, list)
-get_last_path(sibling_only=False) -> list
-get_next_item_and_path(sibling_only=False) -> tuple(dict, list)
-get_parent_item() -> dict
-get_parent_item_and_path(with_children=False) -> tuple(dict, list)
-get_parent_path() -> list
-get_previous_item_and_path(sibling_only=False) -> tuple(dict, list)
-insert_child(idx, **kwargs) -> self
-@contextmanager inverted() -> DictTraversal
-max_depth() -> int
-modify(key=None, value=None, **kwargs) -> self
-move_to_next_item(sibling_only=False) -> self
-move_to_prev_item(sibling_only=False) -> self
-@contextmanager new_root(merge=False) -> DictTraversal
-peek_next(steps=1) -> dict
-peek_prev(steps=1) -> dict
-pretty_print(label_field=None) -> None
-replace_child(idx, **kwargs) -> self
-search(query, label_field) -> list(tuple(dict, list),...)
-set_last_item_as_current(sibling_only=False) -> self
-set_parent_item_as_current() -> self
-visualize(label_field=None, from_root=False) -> str
-```
+    ```
+    demo() -> DictTraversal
+    first(traversal) -> self
+    last(traversal) -> self
+    prev(traversal) -> self/StopIteration
+    root(traversal) -> self
+    validate_data(data, children_field, label_field=None) -> None/ValueError
+    __delitem__(idx) -> self/IndexError/ValueError
+    __getitem__(idx) -> any/IndexError/ValueError
+    __init__(*args, children_field=None, **kwargs) -> DictTraversal
+    __invert__() -> self
+    __iter__() -> self
+    __len__() -> int
+    __neg__() -> self
+    __next__() -> self/StopIteration
+    __pos__() -> self
+    __repr__() -> str
+    add_child(*idx, **kwargs) -> self
+    children(sibling_only=False) -> list
+    count_children(sibling_only=False) -> int
+    find_paths(label_field, titles) -> list(tuple(dict, list),...)
+    get_item_by_path(path) -> dict
+    get_last_item(sibling_only=False) -> dict
+    get_last_item_and_path(sibling_only=False) -> tuple(dict, list)
+    get_last_path(sibling_only=False) -> list
+    get_next_item_and_path(sibling_only=False) -> tuple(dict, list)
+    get_parent_item() -> dict
+    get_parent_item_and_path(with_children=False) -> tuple(dict, list)
+    get_parent_path() -> list
+    get_previous_item_and_path(sibling_only=False) -> tuple(dict, list)
+    insert_child(idx, **kwargs) -> self
+    @contextmanager inverted() -> DictTraversal
+    max_depth() -> int
+    modify(key=None, value=None, **kwargs) -> self
+    move_to_next_item(sibling_only=False) -> self
+    move_to_prev_item(sibling_only=False) -> self
+    @contextmanager new_root(merge=False) -> DictTraversal
+    peek_next(steps=1) -> dict
+    peek_prev(steps=1) -> dict
+    pretty_print(label_field=None) -> None
+    replace_child(idx, **kwargs) -> self
+    search(query, label_field) -> list(tuple(dict, list),...)
+    set_last_item_as_current(sibling_only=False) -> self
+    set_parent_item_as_current() -> self
+    set_path_as_current(path) -> self
+    visualize(label_field=None, from_root=False) -> str
+    ```
 
 ---
 
@@ -188,6 +221,33 @@ Moves the traversal to the first item relative to the root.
 ## Example
  ```python
  first(traversal)  # Returns: {'title': 'Child 1'}
+ ```
+
+---
+
+
+
+# Method: `flatten_dict`
+
+## Description
+Flattens a nested dictionary into a single-level dictionary.
+
+## Parameters
+- __data__ (dict): The nested dictionary to flatten.
+- __field_separator__ (str, optional): The separator for nested keys. Defaults to '.'.
+- __list_index_indicator__ (str, optional): The format string for list indices. Defaults to '#%s'.
+## Behavior
+ - Recursively traverses the nested dictionary and flattens it.
+ - Handles nested dictionaries and lists of dictionaries.
+
+## Example
+ ```python
+ nested_dict = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+ flat_dict = flatten_dict(nested_dict)
+ print(flat_dict)  # Outputs: {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3, 'd#1.g': 4}
+
+ flat_dict = flatten_dict(nested_dict, list_index_indicator='[%s]')
+ print(flat_dict)  # Outputs: {'a.b.c': 1, 'd[0].e': 2, 'd[1].f': 3, 'd[1].g': 4}
  ```
 
 ---
@@ -259,6 +319,45 @@ Moves the traversal to the previous item relative to the current item.
 
 
 
+# Method: `reconstruct_item`
+
+## Description
+Reconstructs an item from a nested dictionary based on a flattened query key.
+
+## Parameters
+- __query_key__ (str): The query key to use for reconstruction.
+- __item__ (dict): The nested dictionary.
+- __field_separator__ (str, optional): The separator for nested keys. Defaults to '.'.
+- __list_index_indicator__ (str, optional): The indicator for list indices. Defaults to '#%s'.
+## Behavior
+ - Splits the query key using `field_separator` and `list_index_indicator`.
+ - Traverses the flattened dictionary to reconstruct the original nested structure.
+ - If the query key ends with a list index indicator (e.g., '#0'), the function returns the item at that index in the list.
+ - If the query key ends with a regular key, the function returns a dictionary containing that key and its corresponding value.
+
+    List Index Indicator:
+ - The `list_index_indicator` is used to specify indices in lists within the nested dictionary.
+ - The default indicator is '#%s', where '%s' is a placeholder for the index number.
+ - The indicator can be customized. For example, using '[%s]' would allow list indices to be specified like 'd[0].e'.
+
+## Example
+ ```python
+ data = {'a': {'b': {'c': 1}}, 'd': [{'e': 2}, {'f': 3, 'g': 4}]}
+ print(reconstruct_item('a.b.c', data))  # Outputs: {'c': 1}
+ print(reconstruct_item('a.b', data))  # Outputs: {'b': {'c': 1}}
+ print(reconstruct_item('a', data))  # Outputs: {'a': {'b': {'c': 1}}}
+
+ print(reconstruct_item('d#0.e', data))  # Outputs: {'e': 2}
+ print(reconstruct_item('d#1', data))  # Outputs: {'f': 3, 'g': 4}
+
+ print(reconstruct_item('d[0].e', data, list_index_indicator='[%s]'))  # Outputs: {'e': 2}
+ print(reconstruct_item('d[1]', data, list_index_indicator='[%s]'))  # Outputs: {'f': 3, 'g': 4}
+ ```
+
+---
+
+
+
 # Method: `root`
 
 ## Description
@@ -273,6 +372,17 @@ Resets the traversal to the root item.
  ```python
  root(traversal)  # Returns: {'title': 'root'}
  ```
+
+---
+
+
+
+# Method: `translate`
+
+## Description
+Translate a shell PATTERN to a regular expression.
+
+There is no way to quote meta-characters.
 
 ---
 
@@ -309,7 +419,7 @@ Validates a nested dictionary structure for specific field requirements.
 
 
 
-# Method: `__delitem__`
+# Method: `DictTraversal.__delitem__`
 
 ## Description
 Deletes an item based on the given index.
@@ -338,7 +448,7 @@ Deletes an item based on the given index.
 
 
 
-# Method: `__getitem__`
+# Method: `DictTraversal.__getitem__`
 
 ## Description
 Retrieves an item based on the given index.
@@ -368,7 +478,7 @@ Retrieves an item based on the given index.
 
 
 
-# Method: `__init__`
+# Method: `DictTraversal.__init__`
 
 ## Description
 Initializes the `DictTraversal` object.
@@ -407,7 +517,7 @@ Initializes the `DictTraversal` object.
 
 
 
-# Method: `__iter__`
+# Method: `DictTraversal.__iter__`
 
 ## Description
 Initializes the iterator for the `DictTraversal` object.
@@ -433,7 +543,7 @@ Initializes the iterator for the `DictTraversal` object.
 
 
 
-# Method: `__neg__`
+# Method: `DictTraversal.__neg__`
 
 ## Description
 Moves the traversal to the previous item.
@@ -452,7 +562,7 @@ Moves the traversal to the previous item.
 
 
 
-# Method: `__next__`
+# Method: `DictTraversal.__next__`
 
 ## Description
 Advances the iterator to the next item in the traversal.
@@ -486,7 +596,7 @@ Advances the iterator to the next item in the traversal.
 
 
 
-# Method: `__pos__`
+# Method: `DictTraversal.__pos__`
 
 ## Description
 Moves the traversal to the next item.
@@ -505,7 +615,7 @@ Moves the traversal to the next item.
 
 
 
-# Method: `add_child`
+# Method: `DictTraversal.add_child`
 
 ## Description
 Adds a new child item to the current item's children.
@@ -529,7 +639,7 @@ Adds a new child item to the current item's children.
 
 
 
-# Method: `children`
+# Method: `DictTraversal.children`
 
 ## Description
 Retrieves the children of the current item.
@@ -551,7 +661,7 @@ Retrieves the children of the current item.
 
 
 
-# Method: `count_children`
+# Method: `DictTraversal.count_children`
 
 ## Description
 Counts the number of child items in the current traversal context.
@@ -582,7 +692,7 @@ Counts the number of child items in the current traversal context.
 
 
 
-# Method: `find_paths`
+# Method: `DictTraversal.find_paths`
 
 ## Description
 Locate items by matching their titles to a list of specified field values.
@@ -606,7 +716,49 @@ Locate items by matching their titles to a list of specified field values.
 
 
 
-# Method: `get_last_item`
+# Method: `DictTraversal.get`
+
+## Description
+Retrieves the value at the specified index key at the current item.
+
+## Parameters
+- __idx__ (int, slice, tuple, list, str): The index key to retrieve the value from.
+- __default__ (any, optional): The default value to return if the index key is not found.
+## Behavior
+ - Retrieves the value at the given index key from the object.
+ - If the index key is not found or the value is None, returns the default value.
+
+## Example
+ ```python
+ value = traversal.get('new_field', default='Not Found')
+ print(value)  # Output will be the value of the key 'new_field' or 'Not Found'
+ ```
+
+---
+
+
+
+# Method: `DictTraversal.get_item_by_path`
+
+## Description
+Retrieves the item located at the specified path in the traversal.
+
+## Parameters
+- __path__ (list): The path to the item in the traversal, represented as a list of integers.
+## Note
+- The method uses the traversal's `__getitem__` method to fetch the item.
+- Returns `None` if the path does not exist.
+
+## Example
+ ```python
+ traversal.get_item_by_path([1, 0])  # Returns: {'title': 'Grandchild 1'}
+ ```
+
+---
+
+
+
+# Method: `DictTraversal.get_last_item`
 
 ## Description
 Retrieves the last item in the current traversal tree from the current item perspective.
@@ -626,7 +778,7 @@ Retrieves the last item in the current traversal tree from the current item pers
 
 
 
-# Method: `get_last_item_and_path`
+# Method: `DictTraversal.get_last_item_and_path`
 
 ## Description
 Retrieves the last item and its path in the traversal tree from the current item perspective.
@@ -648,7 +800,7 @@ Retrieves the last item and its path in the traversal tree from the current item
 
 
 
-# Method: `get_last_path`
+# Method: `DictTraversal.get_last_path`
 
 ## Description
 Retrieves the path to the last item in the traversal from the current item perspective.
@@ -668,7 +820,7 @@ Retrieves the path to the last item in the traversal from the current item persp
 
 
 
-# Method: `get_next_item_and_path`
+# Method: `DictTraversal.get_next_item_and_path`
 
 ## Description
 Retrieves the next item and its path without altering the state of the object.
@@ -691,7 +843,7 @@ Retrieves the next item and its path without altering the state of the object.
 
 
 
-# Method: `get_parent_item`
+# Method: `DictTraversal.get_parent_item`
 
 ## Description
 Retrieves the parent item of the current item in the traversal.
@@ -711,7 +863,7 @@ Retrieves the parent item of the current item in the traversal.
 
 
 
-# Method: `get_parent_item_and_path`
+# Method: `DictTraversal.get_parent_item_and_path`
 
 ## Description
 Retrieves both the parent item and the path to the parent of the current item in the traversal.
@@ -732,7 +884,7 @@ Retrieves both the parent item and the path to the parent of the current item in
 
 
 
-# Method: `get_parent_path`
+# Method: `DictTraversal.get_parent_path`
 
 ## Description
 Retrieves the path to the parent of the current item in the traversal.
@@ -750,7 +902,7 @@ Retrieves the path to the parent of the current item in the traversal.
 
 
 
-# Method: `get_previous_item_and_path`
+# Method: `DictTraversal.get_previous_item_and_path`
 
 ## Description
 Retrieves the previous item and its path without altering the state of the object.
@@ -773,7 +925,7 @@ Retrieves the previous item and its path without altering the state of the objec
 
 
 
-# Method: `insert_child`
+# Method: `DictTraversal.insert_child`
 
 ## Description
 Inserts a new child item at a specific index in the current item's children.
@@ -797,7 +949,7 @@ Inserts a new child item at a specific index in the current item's children.
 
 
 
-# Method: `inverted`
+# Method: `DictTraversal.inverted`
 
 ## Description
 Context manager for backward traversal.
@@ -832,7 +984,7 @@ Context manager for backward traversal.
 
 
 
-# Method: `max_depth`
+# Method: `DictTraversal.max_depth`
 
 ## Description
 Returns the maximum depth of the traversal tree of the current item.
@@ -850,7 +1002,7 @@ Returns the maximum depth of the traversal tree of the current item.
 
 
 
-# Method: `modify`
+# Method: `DictTraversal.modify`
 
 ## Description
 Modifies the current item's attributes.
@@ -876,7 +1028,7 @@ Modifies the current item's attributes.
 
 
 
-# Method: `move_to_next_item`
+# Method: `DictTraversal.move_to_next_item`
 
 ## Description
 Moves the traversal to the next item.
@@ -902,7 +1054,7 @@ Moves the traversal to the next item.
 
 
 
-# Method: `move_to_prev_item`
+# Method: `DictTraversal.move_to_prev_item`
 
 ## Description
 Retrieves the previous item and its path without altering the state of the object.
@@ -925,7 +1077,7 @@ Retrieves the previous item and its path without altering the state of the objec
 
 
 
-# Method: `new_root`
+# Method: `DictTraversal.new_root`
 
 ## Description
 Context manager for temporarily setting a new root for traversal.
@@ -957,7 +1109,7 @@ Context manager for temporarily setting a new root for traversal.
 
 
 
-# Method: `peek_next`
+# Method: `DictTraversal.peek_next`
 
 ## Description
 Peeks at the next item(s) in the traversal without altering the current pointer.
@@ -985,7 +1137,7 @@ Peeks at the next item(s) in the traversal without altering the current pointer.
 
 
 
-# Method: `peek_prev`
+# Method: `DictTraversal.peek_prev`
 
 ## Description
 Peeks at the previous item(s) in the traversal without altering the current pointer.
@@ -1013,7 +1165,7 @@ Peeks at the previous item(s) in the traversal without altering the current poin
 
 
 
-# Method: `pretty_print`
+# Method: `DictTraversal.pretty_print`
 
 ## Description
 Recursively print the tree from the relative current item in a formatted manner.
@@ -1042,7 +1194,7 @@ Recursively print the tree from the relative current item in a formatted manner.
 
 
 
-# Method: `replace_child`
+# Method: `DictTraversal.replace_child`
 
 ## Description
 Replaces an existing child item at a specific index in the current item's children.
@@ -1066,13 +1218,13 @@ Replaces an existing child item at a specific index in the current item's childr
 
 
 
-# Method: `search`
+# Method: `DictTraversal.search`
 
 ## Description
 Search for items whose label match a given query.
 
 ## Parameters
-- __query__ (str or re.Pattern): The search query, either a string or a regular expression pattern.
+- __query__ (str, DictSearchQuery or re.Pattern): The search query, either a string, DictSearchQuery or a regular expression pattern.
 ## Behavior
  - Initializes an empty list `results` to store matching items and their paths.
  - Defines a nested function `_` to recursively search for items with matching titles.
@@ -1090,7 +1242,7 @@ Search for items whose label match a given query.
 
 
 
-# Method: `set_last_item_as_current`
+# Method: `DictTraversal.set_last_item_as_current`
 
 ## Description
 Sets the last item in the traversal as the current item from the current item perspective.
@@ -1110,7 +1262,7 @@ Sets the last item in the traversal as the current item from the current item pe
 
 
 
-# Method: `set_parent_item_as_current`
+# Method: `DictTraversal.set_parent_item_as_current`
 
 ## Description
 Sets the parent item in the traversal as the current item from the current item perspective.
@@ -1129,7 +1281,27 @@ Sets the parent item in the traversal as the current item from the current item 
 
 
 
-# Method: `visualize`
+# Method: `DictTraversal.set_path_as_current`
+
+## Description
+Sets the item located at the specified path as the current item in the traversal.
+
+## Parameters
+- __path__ (list): The path to the item in the traversal, represented as a list of integers.
+## Note
+- Updates both `self.current` and `self.path` attributes.
+- If the item does not exist at the specified path, `self.current` and `self.path` are not updated.
+
+## Example
+ ```python
+ traversal.set_path_as_current([1, 0])  # Sets the current item to the one located at path [1, 0]
+ ```
+
+---
+
+
+
+# Method: `DictTraversal.visualize`
 
 ## Description
 Generates a string representation of the traversal tree.
@@ -1161,4 +1333,79 @@ Generates a string representation of the traversal tree.
  # ├── Grandchild 1
  # └── Grandchild 2
  #     └── Grandgrandchild
+ ```
+
+---
+
+
+
+# Method: `DictSearchQuery.__init__`
+
+## Description
+Initializes a DictSearchQuery object.
+
+## Parameters
+- __query__ (dict): The query to execute.
+- __support_wildcards__ (bool, optional): Flag to enable wildcard support. Defaults to True.
+- __support_regex__ (bool, optional): Flag to enable regex support. Defaults to True.
+- __field_separator__ (str, optional): The separator for nested keys. Defaults to '.'.
+- __list_index_indicator__ (str, optional): The indicator for list indices. Defaults to '#%s'.
+- __operator_separator__ (str, optional): The separator between field and operator. Defaults to '$'.
+## Behavior
+ - Initializes the query, and sets flags for wildcard and regex support.
+
+## Example
+ ```python
+ query = {'a.b.c': 1}
+ dsq = DictSearchQuery(query)
+ data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+ result = dsq.execute(data)
+ print(result)  # Outputs: {'c': 1}
+ ```
+
+---
+
+
+
+# Method: `DictSearchQuery.execute`
+
+## Description
+Executes the query on the data.
+
+## Parameters
+- __data__ (dict): The data to query.
+- __field_separator__ (str, optional): The separator for nested keys. Defaults to `self.field_separator = '.'`.
+- __list_index_indicator__ (str, optional): The format string for list indices. Defaults to `self.list_index_indicator = '#%s'`.
+## Behavior
+ - Flattens the data using `flatten_dict`.
+ - Matches fields based on the query and returns them.
+
+## Example
+ ```python
+ query = {'*': 1}
+ dsq = DictSearchQuery(query)
+ data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+ dsq.execute(data)  # Results: {'c': 1}
+ ```
+
+---
+
+
+
+# Method: `DictSearchQuery.reconstruct_item`
+
+## Description
+Reconstructs an item from a nested dictionary based on a flattened query key, using the instance's field separator and list index indicator.
+
+## Parameters
+- __query_key__ (str): The query key to use for reconstruction.
+- __item__ (dict): The nested dictionary.
+## Note
+- Utilizes the standalone `reconstruct_item` function.
+- Uses `self.field_separator` and `self.list_index_indicator` for the reconstruction.
+
+## Example
+ ```python
+ data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+ DictSearchQuery().reconstruct_item('a.b.c', data)  # Returns: {'c': 1}
  ```
