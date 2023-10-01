@@ -1950,7 +1950,7 @@ class DictSearchQuery:
         ```
     """
 
-    def __init__(self, query, support_wildcards=True, support_regex=True, field_separator='.', list_index_indicator='#%s'):
+    def __init__(self, query, support_wildcards=True, support_regex=True, field_separator='.', list_index_indicator='#%s', operator_separator='$'):
         """
         Initializes a DictSearchQuery object.
 
@@ -1960,6 +1960,7 @@ class DictSearchQuery:
             support_regex (bool, optional): Flag to enable regex support. Defaults to True.
             field_separator (str, optional): The separator for nested keys. Defaults to '.'.
             list_index_indicator (str, optional): The indicator for list indices. Defaults to '#%s'.
+            operator_separator (str, optional): The separator between field and operator. Defaults to '$'.
 
         Behavior:
             - Initializes the query, and sets flags for wildcard and regex support.
@@ -1978,6 +1979,7 @@ class DictSearchQuery:
         self.support_regex = support_regex
         self.field_separator = field_separator
         self.list_index_indicator = list_index_indicator
+        self.operator_separator = operator_separator
 
     def reconstruct_item(self, query_key, item):
         """
@@ -2138,8 +2140,8 @@ class DictSearchQuery:
 
         Parameters:
             data (dict): The data to query.
-            field_separator (str, optional): The separator for nested keys. Defaults to '.'.
-            list_index_indicator (str, optional): The format string for list indices. Defaults to '#%s'.
+            field_separator (str, optional): The separator for nested keys. Defaults to `self.field_separator = '.'`.
+            list_index_indicator (str, optional): The format string for list indices. Defaults to `self.list_index_indicator = '#%s'`.
 
         Returns:
             dict: Dictionary of matched fields and their values if all query keys are matched, otherwise an empty dictionary.
@@ -2152,15 +2154,15 @@ class DictSearchQuery:
             ```python
             query = {'*': 1}
             dsq = DictSearchQuery(query)
-            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
-            dsq.execute(data)  # Results: {'a.b.c': 1}
+            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+            dsq.execute(data)  # Results: {'c': 1}
             ```
         """
         query_keys = set(self.query.keys())
         flattened_data = flatten_dict(data, field_separator or self.field_separator, list_index_indicator or self.list_index_indicator)
         query_keys_matched, matched_fields = set(), {}
         for q_key, q_value in self.query.items():
-            q_key_parts = q_key.split('$')
+            q_key_parts = q_key.split(self.operator_separator)
             q_key_main = q_key_parts[0]
             q_operator = q_key_parts[1] if len(q_key_parts) > 1 else 'eq'
             for new_key, value in flattened_data.items():
