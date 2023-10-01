@@ -171,7 +171,7 @@ Except from child field, all other fields are optional and the rest of the dicti
     peek_prev(steps=1) -> dict
     pretty_print(label_field=None) -> None
     replace_child(idx, **kwargs) -> self
-    search(query, label_field) -> list(tuple(dict, list),...)
+    search(query, label_field=None) -> list(tuple(dict, list),...)
     set_last_item_as_current(sibling_only=False) -> self
     set_parent_item_as_current() -> self
     set_path_as_current(path) -> self
@@ -1225,6 +1225,7 @@ Search for items whose label match a given query.
 
 ## Parameters
 - __query__ (str, DictSearchQuery or re.Pattern): The search query, either a string, DictSearchQuery or a regular expression pattern.
+- __label_field__ (str): Field name to be used as a target of search for each item, if query is `str` or `re.Pattern`. Default is None.
 ## Behavior
  - Initializes an empty list `results` to store matching items and their paths.
  - Defines a nested function `_` to recursively search for items with matching titles.
