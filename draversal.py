@@ -1932,6 +1932,32 @@ class DictSearchQuery:
         # Regular expression with case insensitive support
         'regex': lambda v, q: re.match((re.compile(q, re.IGNORECASE) if q.startswith('(?i)') else re.compile(q)) if not isinstance(q, re.Pattern) else q, v)
     }
+    """
+    OPERATOR_MAP: dict
+
+    A mapping of operator strings to their corresponding Python functions or lambda expressions.
+
+    Attributes:
+        'eq': Equals. Uses Python's `==` operator.
+        'ge': Greater or equal. Uses Python's `>=` operator.
+        'gt': Greater than. Uses Python's `>` operator.
+        'le': Less or equal. Uses Python's `<=` operator.
+        'lt': Less than. Uses Python's `<` operator.
+        'ne': Not equals. Uses Python's `!=` operator.
+        'contains': Checks if a list contains a given value.
+        'is': Checks if the value is the same, type-wise.
+        'in': Checks if the value is in a list.
+        'exists': Checks if the field exists in the data. The check is performed in the `operate` function.
+        'type': Checks if the type of the value matches the given type (in string format).
+        'func': Passes data to a function for more complex matches. The function takes two arguments: `d=data` and `f=field`.
+        'regex': Matches a value against a regular expression pattern, with optional case-insensitive support.
+
+    Example:
+        ```python
+        # Using 'ge' would perform a greater-or-equal comparison:
+        DictSearchQuery.OPERATOR_MAP['ge'](5, 3)  # Returns: True
+        ```
+    """
 
     def __init__(self, query, support_wildcards=True, support_regex=True, field_separator='.', list_index_indicator='#%s'):
         """
