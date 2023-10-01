@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from .DictSearchQuery import DictSearchQuery, reconstruct_item
+from .DictSearchQuery import DictSearchQuery
 import re
 
 
@@ -1448,7 +1448,7 @@ class DictTraversal(dict):
         """
         # If query is a DictSearchQuery, execute search and reconstruct flattened keys back to nested dictionary structure.
         if isinstance(query, DictSearchQuery):
-            return [(self._without_children(reconstruct_item(k, self.current).items()), [int(match) for match in re.findall(f'{self.children_field}#(\d+)', k)]) for k, _ in query.execute(self.current).items()]
+            return [(self._without_children(query.reconstruct_item(k, self.current).items()), [int(match) for match in re.findall(f"{self.children_field}%s" % query.list_index_indicator.replace('%s', '(\d+)'), k)]) for k, _ in query.execute(self.current).items()]
         # Else perform plain string or regex search.
         results = []
         def _(subitems, new_path=[]):

@@ -21,9 +21,12 @@ def flatten_dict(data, field_separator='.', list_index_indicator='#%s'):
 
     Example:
         ```python
-        nested_dict = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
+        nested_dict = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
         flat_dict = flatten_dict(nested_dict)
-        print(flat_dict)  # Outputs: {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3}
+        print(flat_dict)  # Outputs: {'a.b.c': 1, 'd#0.e': 2, 'd#1.f': 3, 'd#1.g': 4}
+
+        flat_dict = flatten_dict(nested_dict, list_index_indicator='[%s]')
+        print(flat_dict)  # Outputs: {'a.b.c': 1, 'd[0].e': 2, 'd[1].f': 3, 'd[1].g': 4}
         ```
     """
     def _(data, parent_key=''):
@@ -41,15 +44,15 @@ def flatten_dict(data, field_separator='.', list_index_indicator='#%s'):
     return _(data)
 
 
-def reconstruct_item(query_key, item, field_separator='.', list_index_indicator='#'):
+def reconstruct_item(query_key, item, field_separator='.', list_index_indicator='#%s'):
     """
-    Reconstructs an item from a flattened dictionary based on a query key.
+    Reconstructs an item from a nested dictionary based on a flattened query key.
 
     Parameters:
         query_key (str): The query key to use for reconstruction.
-        item (dict): The flattened dictionary.
+        item (dict): The nested dictionary.
         field_separator (str, optional): The separator for nested keys. Defaults to '.'.
-        list_index_indicator (str, optional): The indicator for list indices. Defaults to '#'.
+        list_index_indicator (str, optional): The indicator for list indices. Defaults to '#%s'.
 
     Returns:
         Any: The reconstructed item.
@@ -57,22 +60,48 @@ def reconstruct_item(query_key, item, field_separator='.', list_index_indicator=
     Behavior:
         - Splits the query key using `field_separator` and `list_index_indicator`.
         - Traverses the flattened dictionary to reconstruct the original nested structure.
+        - If the query key ends with a list index indicator (e.g., '#0'), the function returns the item at that index in the list.
+        - If the query key ends with a regular key, the function returns a dictionary containing that key and its corresponding value.
+
+    List Index Indicator:
+        - The `list_index_indicator` is used to specify indices in lists within the nested dictionary.
+        - The default indicator is '#%s', where '%s' is a placeholder for the index number.
+        - The indicator can be customized. For example, using '[%s]' would allow list indices to be specified like 'd[0].e'.
 
     Example:
         ```python
-        data = {'a': {'b': {'c': 1}}, 'd': [{'e': 2}, {'f': 3}]}
-        print(reconstruct_item('a.b.c', data))  # Outputs: 1
-        print(reconstruct_item('d#0.e', data))  # Outputs: 2
-        print(reconstruct_item('d#1', data))  # Outputs: {'f': 3}
+        data = {'a': {'b': {'c': 1}}, 'd': [{'e': 2}, {'f': 3, 'g': 4}]}
+        print(reconstruct_item('a.b.c', data))  # Outputs: {'c': 1}
+        print(reconstruct_item('a.b', data))  # Outputs: {'b': {'c': 1}}
+        print(reconstruct_item('a', data))  # Outputs: {'a': {'b': {'c': 1}}}
+
+        print(reconstruct_item('d#0.e', data))  # Outputs: {'e': 2}
+        print(reconstruct_item('d#1', data))  # Outputs: {'f': 3, 'g': 4}
+
+        print(reconstruct_item('d[0].e', data, list_index_indicator='[%s]'))  # Outputs: {'e': 2}
+        print(reconstruct_item('d[1]', data, list_index_indicator='[%s]'))  # Outputs: {'f': 3, 'g': 4}
         ```
     """
-    for key in query_key.split(field_separator)[:-1]:
-        key_parts = key.split(list_index_indicator)
-        key_main = key_parts[0]
-        item = item[key_main]
-        if len(key_main) > 1:
-            item = item[int(key_parts[1])]
-    return item
+    list_index_pattern = re.escape(list_index_indicator).replace('%s', '(\d+)')
+    list_index_regex = re.compile(f'(.*){list_index_pattern}')
+    
+    def get_item_by_key(item, key, wrap_in_dict=False):
+        key_parts = re.fullmatch(list_index_regex, key)
+        if key_parts:
+            key_main, index = key_parts.groups()
+            return item[key_main][int(index)]
+        else:
+            return {key: item[key]} if wrap_in_dict else item[key]
+    
+    keys = [x for x in query_key.split(field_separator) if x]
+    
+    if len(keys) == 1:
+        return get_item_by_key(item, keys[0], wrap_in_dict=True)
+    
+    for key in keys[:-1]:
+        item = get_item_by_key(item, key)
+    
+    return {keys[-1]: item[keys[-1]]}
 
 
 class DictSearchQuery:
@@ -101,11 +130,11 @@ class DictSearchQuery:
 
     Example:
         ```python
-        data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3} ]}
         query = {'a.b.c': 1}
         dsq = DictSearchQuery(query)
+        data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
         result = dsq.execute(data)
-        print(result)  # Outputs: {'a.b.c': 1}
+        print(result)  # Outputs: {'c': 1}
         ```
     """
 
@@ -128,7 +157,7 @@ class DictSearchQuery:
         'regex': lambda v, q: re.match((re.compile(q, re.IGNORECASE) if q.startswith('(?i)') else re.compile(q)) if not isinstance(q, re.Pattern) else q, v)
     }
 
-    def __init__(self, query, support_wildcards=True, support_regex=True):
+    def __init__(self, query, support_wildcards=True, support_regex=True, field_separator='.', list_index_indicator='#%s'):
         """
         Initializes a DictSearchQuery object.
 
@@ -136,13 +165,49 @@ class DictSearchQuery:
             query (dict): The query to execute.
             support_wildcards (bool, optional): Flag to enable wildcard support. Defaults to True.
             support_regex (bool, optional): Flag to enable regex support. Defaults to True.
+            field_separator (str, optional): The separator for nested keys. Defaults to '.'.
+            list_index_indicator (str, optional): The indicator for list indices. Defaults to '#%s'.
 
         Behavior:
             - Initializes the query, and sets flags for wildcard and regex support.
+
+        Example:
+            ```python
+            query = {'a.b.c': 1}
+            dsq = DictSearchQuery(query)
+            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+            result = dsq.execute(data)
+            print(result)  # Outputs: {'c': 1}
+            ```
         """
         self.query = query
         self.support_wildcards = support_wildcards
         self.support_regex = support_regex
+        self.field_separator = field_separator
+        self.list_index_indicator = list_index_indicator
+
+    def reconstruct_item(self, query_key, item):
+        """
+        Reconstructs an item from a nested dictionary based on a flattened query key, using the instance's field separator and list index indicator.
+
+        Parameters:
+            query_key (str): The query key to use for reconstruction.
+            item (dict): The nested dictionary.
+
+        Returns:
+            Any: The reconstructed item.
+
+        Note:
+            - Utilizes the standalone `reconstruct_item` function.
+            - Uses `self.field_separator` and `self.list_index_indicator` for the reconstruction.
+
+        Example:
+            ```python
+            data = {'a': {'b': {'c': 1}}, 'd': [ {'e': 2}, {'f': 3, 'g': 4} ]}
+            DictSearchQuery().reconstruct_item('a.b.c', data)  # Returns: {'c': 1}
+            ```
+        """
+        return reconstruct_item(query_key, item, self.field_separator, self.list_index_indicator)
 
     def operate(self, operator, field, data, query):
         """
@@ -274,7 +339,7 @@ class DictSearchQuery:
                 self.match_wildcards(query_key, new_key) or
                 query_key == new_key)
 
-    def execute(self, data, field_separator='.', list_index_indicator='#%s'):
+    def execute(self, data, field_separator=None, list_index_indicator=None):
         """
         Executes the query on the data.
 
@@ -299,7 +364,7 @@ class DictSearchQuery:
             ```
         """
         query_keys = set(self.query.keys())
-        flattened_data = flatten_dict(data, field_separator, list_index_indicator)
+        flattened_data = flatten_dict(data, field_separator or self.field_separator, list_index_indicator or self.list_index_indicator)
         query_keys_matched, matched_fields = set(), {}
         for q_key, q_value in self.query.items():
             q_key_parts = q_key.split('$')
