@@ -140,7 +140,7 @@ class DictTraversal(dict):
     peek_prev(steps=1) -> dict
     pretty_print(label_field=None) -> None
     replace_child(idx, **kwargs) -> self
-    search(query, label_field) -> list(tuple(dict, list),...)
+    search(query, label_field=None) -> list(tuple(dict, list),...)
     set_last_item_as_current(sibling_only=False) -> self
     set_parent_item_as_current() -> self
     set_path_as_current(path) -> self
@@ -1431,6 +1431,8 @@ class DictTraversal(dict):
 
         Parameters:
             query (str, DictSearchQuery or re.Pattern): The search query, either a string, DictSearchQuery or a regular expression pattern.
+            label_field (str): Field name to be used as a target of search for each item, if query is `str` or `re.Pattern`. Default is None.
+
         Returns:
             list: A list of tuples, each containing a matching item and its path.
 
