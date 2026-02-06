@@ -1,6 +1,14 @@
 # draversal
 A package for depth-first traversal of Python dictionaries with uniform child fields, supporting both forward and backward navigation.
 
+## MCP server
+
+This repository includes an MCP server that exposes draversal utilities as tools.
+Persistence defaults to a directory store at `~/.draversal/trees/` (one JSON file per tree),
+falling back to the legacy `~/.draversal/trees.json` if it already exists.
+Override with `DRAVERSAL_MCP_STORE_PATH` to point at either a file or a directory.
+See `docs/mcp_server.md` for usage and tool descriptions.
+
 
 ---
 

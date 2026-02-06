@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "kind": {
+      "type": "string",
+      "enum": ["project", "task", "subtask"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["todo", "doing", "blocked", "done"]
+    }
+  },
+  "required": ["title", "kind", "status"],
+  "properties": {
+    "title": {"type": "string"},
+    "kind": {"$ref": "#/$defs/kind"},
+    "status": {"$ref": "#/$defs/status"},
+    "assignee": {"type": "string"},
+    "due": {"type": "string"},
+    "priority": {"type": "integer"},
+    "tags": {"type": "array"}
+  },
+  "additionalProperties": true
+}

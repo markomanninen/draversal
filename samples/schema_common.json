@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/samples/schema_common.json",
+  "$defs": {
+    "kind_chapter": {
+      "type": "string",
+      "enum": ["book", "part", "chapter", "section"]
+    },
+    "status_chapter": {
+      "type": "string",
+      "enum": ["todo", "draft", "review", "done"]
+    }
+  }
+}

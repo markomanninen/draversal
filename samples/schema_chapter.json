@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "kind": {
+      "type": "string",
+      "enum": ["book", "part", "chapter", "section"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["todo", "draft", "review", "done"]
+    }
+  },
+  "required": ["title", "kind"],
+  "properties": {
+    "title": {"type": "string"},
+    "kind": {"$ref": "#/$defs/kind"},
+    "summary": {"type": "string"},
+    "status": {"$ref": "#/$defs/status"},
+    "notes": {"type": "string"}
+  },
+  "additionalProperties": true
+}

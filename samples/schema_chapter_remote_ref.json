@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/samples/schema_chapter_remote_ref.json",
+  "required": ["title", "kind"],
+  "properties": {
+    "title": {"type": "string"},
+    "kind": {"$ref": "https://example.com/samples/schema_common.json#/$defs/kind_chapter"},
+    "summary": {"type": "string"},
+    "status": {"$ref": "https://example.com/samples/schema_common.json#/$defs/status_chapter"},
+    "notes": {"type": "string"}
+  },
+  "additionalProperties": true
+}

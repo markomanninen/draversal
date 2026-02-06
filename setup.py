@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='draversal',
-    version='0.1.5',
+    version='0.1.6',
     packages=find_packages(),
     author='Marko T. Manninen',
     author_email='elonmedia@gmail.com',
@@ -19,4 +19,13 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
     ],
+    extras_require={
+        'mcp': ['mcp', 'jsonschema'],
+    },
+    entry_points={
+        'console_scripts': [
+            'draversal-mcp=draversal_mcp.server:main',
+            'draversal-store=draversal_mcp.cli:main',
+        ],
+    },
 )
