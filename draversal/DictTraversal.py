@@ -197,6 +197,42 @@ class DictTraversal(dict):
         self.next_iteration_start = True
         self.prev_iteration_stop = False
 
+    @property
+    def data(self):
+        """
+        Returns the root dictionary data, safe to use after navigation.
+
+        Behavior:
+            - Always returns the root-level dictionary regardless of the current
+              traversal position.
+            - Uses ``dict.items()`` internally, which accesses the underlying dict
+              storage directly and is **not** affected by ``__getitem__`` overrides.
+
+        Returns:
+            dict: A dictionary containing the root-level key-value pairs (including children).
+
+        Note:
+            - After calling ``set_path_as_current()`` or any navigation method,
+              ``dict(self)`` produces **incorrect** results because Python's ``dict()``
+              constructor calls the overridden ``__getitem__`` which returns values from
+              ``self.current`` (the navigated-to child), not from the root.
+            - Always use ``.data`` instead of ``dict(traversal)`` to obtain the full
+              root tree structure.
+
+        Example:
+            ```python
+            traversal = DictTraversal(data, children_field='sections')
+            traversal.set_path_as_current([1, 0])
+
+            # WRONG — mixes root keys with current-node values:
+            dict(traversal)  # {'title': 'Grandchild 1', 'sections': None}
+
+            # CORRECT — always returns root data:
+            traversal.data   # {'title': 'root', 'sections': [...]}
+            ```
+        """
+        return {k: v for k, v in dict.items(self)}
+
     def __neg__(self):
         """
         Moves the traversal to the previous item.

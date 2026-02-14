@@ -162,6 +162,34 @@ class TestMcpPersistence(unittest.TestCase):
         self.assertEqual(sections[0]["title"], "Child 1 Updated")
         self.assertEqual(sections[1]["title"], "Child 2")
 
+    def test_modify_deep_child_persists(self):
+        """Verify modify on a deeply nested child saves correctly via entry['data']."""
+        saved = tools.save_tree(self.data, self.children_field, self.label_field)
+        tree_id = saved["tree_id"]
+        # Modify the deepest node: path [1, 1, 0] = Grandgrandchild
+        tools.modify_item(tree_id, [1, 1, 0], changes={"title": "GGC Updated"})
+        fetched = tools.get_tree(tree_id)
+        deep = fetched["data"]["sections"][1]["sections"][1]["sections"][0]
+        self.assertEqual(deep["title"], "GGC Updated")
+
+    def test_batch_ops_modify_and_verify_root_intact(self):
+        """Batch modify + add_child preserves root and sibling data."""
+        saved = tools.save_tree(self.data, self.children_field, self.label_field)
+        tree_id = saved["tree_id"]
+        tools.apply_tree_ops(tree_id, [
+            {"op": "modify", "path": [1, 0], "changes": {"title": "GC1 Updated"}},
+            {"op": "add_child", "path": [1], "item": {"title": "Grandchild 3"}},
+        ])
+        fetched = tools.get_tree(tree_id)
+        # Root title unchanged
+        self.assertEqual(fetched["data"]["title"], "root")
+        # Sibling Child 1 unchanged
+        self.assertEqual(fetched["data"]["sections"][0]["title"], "Child 1")
+        # Modified grandchild
+        self.assertEqual(fetched["data"]["sections"][1]["sections"][0]["title"], "GC1 Updated")
+        # Added grandchild
+        self.assertEqual(fetched["data"]["sections"][1]["sections"][-1]["title"], "Grandchild 3")
+
     def test_schema_validation(self):
         try:
             import jsonschema  # noqa: F401

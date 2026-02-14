@@ -130,7 +130,7 @@ def _save_traversal(
     entry: Dict[str, Any],
     tree_id: str,
 ) -> Dict[str, Any]:
-    data = {k: v for k, v in traversal.items()}
+    data = entry["data"]
     _validate_tree(entry, data)
     return storage.save_tree(
         data,
