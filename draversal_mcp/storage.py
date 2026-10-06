@@ -43,6 +43,27 @@ def _tree_file_path(store_dir: Path, tree_id: str) -> Path:
     return store_dir / _encode_tree_id(tree_id)
 
 
+def _cursor_file_path(store_dir: Path, tree_id: str) -> Path:
+    # Cursor is kept in a small side file, so moving it does not rewrite the whole tree.
+    # The suffix is not .json, so listing the store does not pick it up as a tree.
+    return store_dir / (_encode_tree_id(tree_id) + ".cursor")
+
+
+def _read_cursor(store_dir: Path, tree_id: str, entry: Dict[str, Any]) -> List[int]:
+    cursor_path = _cursor_file_path(store_dir, tree_id)
+    if cursor_path.exists():
+        return json.loads(cursor_path.read_text())
+    # Legacy entries keep the cursor inside the tree file
+    return entry.get("cursor_path", [])
+
+
+def _write_cursor(store_dir: Path, tree_id: str, cursor: List[int]) -> None:
+    cursor_path = _cursor_file_path(store_dir, tree_id)
+    tmp_path = cursor_path.with_suffix(cursor_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(cursor))
+    tmp_path.replace(cursor_path)
+
+
 def _load_store(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {"version": 1, "trees": {}}
@@ -169,7 +190,7 @@ def save_tree(
             except KeyError:
                 existing = None
             created_at = existing.get("created_at", now) if existing else now
-            cursor_path = existing.get("cursor_path", []) if existing else []
+            cursor_path = _read_cursor(path, tree_id, existing) if existing else []
             if schema is None and existing:
                 schema = existing.get("schema")
 
@@ -188,6 +209,7 @@ def save_tree(
             "updated_at": now,
         }
         _write_tree_file(_tree_file_path(path, tree_id), entry)
+        _write_cursor(path, tree_id, cursor_path)
         return {
             "tree_id": tree_id,
             "created_at": created_at,
@@ -244,7 +266,9 @@ def get_tree(
 ) -> Dict[str, Any]:
     path = store_path or _default_store_path()
     if _is_dir_store(path):
-        entry = _with_meta(_load_tree_entry(path, tree_id))
+        entry = _load_tree_entry(path, tree_id)
+        entry["cursor_path"] = _read_cursor(path, tree_id, entry)
+        entry = _with_meta(entry)
     else:
         store = _load_store(path)
         entry = store["trees"].get(tree_id)
@@ -284,6 +308,7 @@ def delete_tree(tree_id: str, store_path: Optional[Path] = None) -> Dict[str, An
         tree_path = _tree_file_path(path, tree_id)
         if tree_path.exists():
             tree_path.unlink()
+            _cursor_file_path(path, tree_id).unlink(missing_ok=True)
             return {"deleted": True, "tree_id": tree_id}
         return {"deleted": False, "tree_id": tree_id}
     store = _load_store(path)
@@ -297,8 +322,10 @@ def delete_tree(tree_id: str, store_path: Optional[Path] = None) -> Dict[str, An
 def get_cursor(tree_id: str, store_path: Optional[Path] = None) -> List[int]:
     path = store_path or _default_store_path()
     if _is_dir_store(path):
-        entry = _load_tree_entry(path, tree_id)
-        return entry.get("cursor_path", [])
+        cursor_path = _cursor_file_path(path, tree_id)
+        if cursor_path.exists():
+            return json.loads(cursor_path.read_text())
+        return _load_tree_entry(path, tree_id).get("cursor_path", [])
     store = _load_store(path)
     entry = store["trees"].get(tree_id)
     if not entry:
@@ -313,9 +340,9 @@ def set_cursor(
 ) -> Dict[str, Any]:
     path = store_path or _default_store_path()
     if _is_dir_store(path):
-        entry = _load_tree_entry(path, tree_id)
-        entry["cursor_path"] = cursor_path
-        _write_tree_file(_tree_file_path(path, tree_id), entry)
+        if not _tree_file_path(path, tree_id).exists():
+            raise KeyError(f"Tree not found: {tree_id}")
+        _write_cursor(path, tree_id, cursor_path)
         return {"tree_id": tree_id, "cursor_path": cursor_path}
     store = _load_store(path)
     entry = store["trees"].get(tree_id)

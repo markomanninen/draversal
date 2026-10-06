@@ -130,7 +130,9 @@ def _save_traversal(
     entry: Dict[str, Any],
     tree_id: str,
 ) -> Dict[str, Any]:
-    data = entry["data"]
+    # Root fields live in the traversal itself, children lists are shared with entry["data"]
+    data = traversal.data
+    entry["data"] = data
     _validate_tree(entry, data)
     return storage.save_tree(
         data,
@@ -439,22 +441,74 @@ def set_cursor(tree_id: str, path: List[int]) -> Dict[str, Any]:
     return storage.set_cursor(tree_id, path)
 
 
-def next_item(tree_id: str, sibling_only: bool = False) -> Dict[str, Any]:
-    """Advance the stored cursor and return the next item and path."""
-    cursor_path = storage.get_cursor(tree_id)
-    traversal, _ = _get_traversal(tree_id, cursor_path)
-    item, item_path = traversal.get_next_item_and_path(sibling_only=sibling_only)
-    storage.set_cursor(tree_id, item_path)
-    return {"item": item, "path": item_path}
+def _move_cursor(
+    tree_id: str,
+    forward: bool,
+    sibling_only: bool = False,
+    where: Optional[Dict[str, Any]] = None,
+    update_current: Optional[Dict[str, Any]] = None,
+    include_children: bool = False,
+) -> Dict[str, Any]:
+    # The tree is loaded once; only the small cursor file is written,
+    # unless update_current modifies the item under the cursor first.
+    entry = _load_tree(tree_id)
+    children_field = entry["children_field"]
+    traversal = DictTraversal(entry["data"], children_field=children_field)
+    traversal.set_path_as_current(entry.get("cursor_path", []))
+    if update_current:
+        traversal.modify(**update_current)
+        _save_traversal(traversal, entry, tree_id)
+    move = traversal.move_to_next_item if forward else traversal.move_to_prev_item
+    query = DictSearchQuery(where) if where else None
+    # Visit every item at most once, root included, before giving up
+    node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
+    for _ in range(node_count if query else 1):
+        move(sibling_only=sibling_only)
+        item = traversal.current
+        fields = {k: v for k, v in item.items() if k != children_field}
+        if query is None or query.execute(fields):
+            storage.set_cursor(tree_id, traversal.path)
+            response = {
+                "item": item if include_children else fields,
+                "path": traversal.path,
+                "child_count": len(item.get(children_field) or []),
+            }
+            return response
+    return {"item": None, "path": entry.get("cursor_path", []), "child_count": 0}
 
 
-def prev_item(tree_id: str, sibling_only: bool = False) -> Dict[str, Any]:
-    """Move the stored cursor to the previous item and return it and its path."""
-    cursor_path = storage.get_cursor(tree_id)
-    traversal, _ = _get_traversal(tree_id, cursor_path)
-    item, item_path = traversal.get_previous_item_and_path(sibling_only=sibling_only)
-    storage.set_cursor(tree_id, item_path)
-    return {"item": item, "path": item_path}
+def next_item(
+    tree_id: str,
+    sibling_only: bool = False,
+    where: Optional[Dict[str, Any]] = None,
+    update_current: Optional[Dict[str, Any]] = None,
+    include_children: bool = False,
+) -> Dict[str, Any]:
+    """Advance the stored cursor and return the next item and path.
+
+    `where` skips items that do not match a DictSearchQuery style query against
+    the item's own fields, for example `{"status$ne": "done"}`. If no item matches,
+    `item` is None and the cursor does not move.
+    `update_current` modifies the item under the cursor before moving, for example
+    `{"status": "done"}`, so completing a task and advancing is a single call.
+    The item is returned without its children unless `include_children` is True;
+    `child_count` tells how many direct children it has.
+    """
+    return _move_cursor(tree_id, True, sibling_only, where, update_current, include_children)
+
+
+def prev_item(
+    tree_id: str,
+    sibling_only: bool = False,
+    where: Optional[Dict[str, Any]] = None,
+    update_current: Optional[Dict[str, Any]] = None,
+    include_children: bool = False,
+) -> Dict[str, Any]:
+    """Move the stored cursor to the previous item and return it and its path.
+
+    Accepts the same `where`, `update_current` and `include_children` options as `next_item`.
+    """
+    return _move_cursor(tree_id, False, sibling_only, where, update_current, include_children)
 
 
 def save_tree(

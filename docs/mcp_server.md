@@ -6,7 +6,7 @@ core draversal utilities as tools.
 ## Requirements
 
 - Python 3.10+
-- `mcp` (install with `pip install mcp`)
+- `mcp` 1.x (install with `pip install 'mcp<2'`; the 2.x SDK renamed `FastMCP` and is not supported yet)
 - `jsonschema` (for schema validation)
 
 ## Run the server
@@ -107,8 +107,15 @@ Restart clients after updating config files.
 - `delete_child`: Delete a child at a path.
 - `get_cursor`: Get the stored cursor path.
 - `set_cursor`: Set the stored cursor path.
-- `next_item`: Advance the cursor and return the next item and path.
-- `prev_item`: Move the cursor back and return the previous item and path.
+- `next_item`: Advance the cursor and return the next item (without children),
+  its path and `child_count`. Options:
+  - `where`: skip items whose own fields do not match a `DictSearchQuery` style
+    query, e.g. `{"status$ne": "done"}` jumps straight to the next open task.
+    If nothing matches, `item` is `null` and the cursor does not move.
+  - `update_current`: fields to set on the item under the cursor before moving,
+    e.g. `{"status": "done"}`, so "complete and go to next" is a single call.
+  - `include_children`: return the item with its whole subtree.
+- `prev_item`: Move the cursor back; same options and response as `next_item`.
 - `save_tree`: Persist a tree and return its `tree_id`.
 - `get_tree`: Retrieve a persisted tree by `tree_id`.
 - `list_trees`: List stored trees (metadata only).
@@ -124,6 +131,9 @@ Trees are stored on disk so any MCP client can recall them across sessions.
 If `~/.draversal/trees.json` exists, it is used as the legacy single-file store.
 Otherwise the default is the directory store at `~/.draversal/trees/` (one file per tree).
 Override with `DRAVERSAL_MCP_STORE_PATH` to point at either a file or a directory.
+In the directory store, the cursor of each tree is kept in a small side file
+(`<tree file>.cursor`), so moving the cursor does not rewrite the tree. Older
+entries that only have `cursor_path` inside the tree file are still read.
 On Windows the legacy file resolves to `%USERPROFILE%\\.draversal\\trees.json`.
 
 `list_trees` includes `count` (total nodes, including root) and `top_labels`

@@ -14,6 +14,9 @@ See `docs/mcp_server.md` for usage and tool descriptions.
 See `docs/performance.md` for benchmark results, the `DictSearchQuery` pattern cache
 and notes on very deep trees (iteration cost and recursion limit).
 
+`docs/background.md` describes the purpose (economical task-list browsing over MCP),
+comparable MCP servers and libraries, and where the cost of an MCP call goes.
+
 
 ---
 

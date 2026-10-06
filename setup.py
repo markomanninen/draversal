@@ -20,7 +20,8 @@ setup(
         'Operating System :: OS Independent',
     ],
     extras_require={
-        'mcp': ['mcp', 'jsonschema'],
+        # mcp 2.x renamed FastMCP to MCPServer; server.py uses the 1.x API
+        'mcp': ['mcp>=1.2,<2', 'jsonschema'],
     },
     entry_points={
         'console_scripts': [

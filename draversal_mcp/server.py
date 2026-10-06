@@ -6,7 +6,7 @@ try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - only raised when MCP is missing
     raise RuntimeError(
-        "mcp is required to run the server. Install with: pip install mcp"
+        "mcp is required to run the server. Install with: pip install 'mcp<2'"
     ) from exc
 
 from . import tools
@@ -266,15 +266,44 @@ def set_cursor(tree_id: str, path: List[int]) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def next_item(tree_id: str, sibling_only: bool = False) -> Dict[str, Any]:
-    """Advance the stored cursor and return the next item and path."""
-    return tools.next_item(tree_id, sibling_only=sibling_only)
+def next_item(
+    tree_id: str,
+    sibling_only: bool = False,
+    where: Optional[Dict[str, Any]] = None,
+    update_current: Optional[Dict[str, Any]] = None,
+    include_children: bool = False,
+) -> Dict[str, Any]:
+    """Advance the stored cursor and return the next item (without children), its path and child_count.
+
+    where: skip items not matching this query on their own fields, e.g. {"status$ne": "done"}.
+    update_current: fields to set on the item under the cursor before moving, e.g. {"status": "done"}.
+    If nothing matches, item is null and the cursor stays.
+    """
+    return tools.next_item(
+        tree_id,
+        sibling_only=sibling_only,
+        where=where,
+        update_current=update_current,
+        include_children=include_children,
+    )
 
 
 @mcp.tool()
-def prev_item(tree_id: str, sibling_only: bool = False) -> Dict[str, Any]:
-    """Move the stored cursor to the previous item and return it and its path."""
-    return tools.prev_item(tree_id, sibling_only=sibling_only)
+def prev_item(
+    tree_id: str,
+    sibling_only: bool = False,
+    where: Optional[Dict[str, Any]] = None,
+    update_current: Optional[Dict[str, Any]] = None,
+    include_children: bool = False,
+) -> Dict[str, Any]:
+    """Move the stored cursor back; same options and response as next_item."""
+    return tools.prev_item(
+        tree_id,
+        sibling_only=sibling_only,
+        where=where,
+        update_current=update_current,
+        include_children=include_children,
+    )
 
 
 @mcp.tool()

@@ -74,6 +74,15 @@ class TestStoreCli(unittest.TestCase):
         self.assertEqual(len(listing), 1)
         self.assertEqual(len(list(self.store_dir.glob("*.json"))), 1)
 
+    def test_prune_removes_orphan_cursor_files(self):
+        data = {"title": "root", "sections": []}
+        storage.save_tree(data, "sections", label_field="title")
+        (self.store_dir / "gone.json.cursor").write_text("[]")
+
+        output, code = self._run_cli(["prune"])
+        self.assertEqual(json.loads(output)["removed_files"], 1)
+        self.assertEqual(len(list(self.store_dir.glob("*.json.cursor"))), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,9 +2,10 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from draversal import demo
-from draversal_mcp import tools
+from draversal_mcp import storage, tools
 
 
 class TestMcpTools(unittest.TestCase):
@@ -250,3 +251,90 @@ class TestMcpPersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMcpCursorEconomy(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        data = {"title": "All", "status": "todo", "tasks": [
+            {"title": "P1", "status": "done", "tasks": [
+                {"title": "T1", "status": "done"},
+                {"title": "T2", "status": "todo"},
+            ]},
+            {"title": "P2", "status": "todo", "tasks": [{"title": "T3", "status": "doing"}]},
+        ]}
+        self.tree_id = tools.save_tree(data, "tasks", "title")["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def test_next_item_returns_item_without_children(self):
+        result = tools.next_item(self.tree_id)
+        self.assertEqual(result, {"item": {"title": "P1", "status": "done"}, "path": [0], "child_count": 2})
+        self.assertEqual(tools.get_cursor(self.tree_id), [0])
+        tools.set_cursor(self.tree_id, [])
+        full = tools.next_item(self.tree_id, include_children=True)
+        self.assertEqual(len(full["item"]["tasks"]), 2)
+
+    def test_next_item_where_skips_non_matching_items(self):
+        where = {"status$ne": "done"}
+        self.assertEqual(tools.next_item(self.tree_id, where=where)["path"], [0, 1])
+        self.assertEqual(tools.next_item(self.tree_id, where=where)["path"], [1])
+        self.assertEqual(tools.next_item(self.tree_id, where=where)["path"], [1, 0])
+        # Wraps around through the root, which is also an item
+        self.assertEqual(tools.next_item(self.tree_id, where=where)["path"], [])
+        self.assertEqual(tools.prev_item(self.tree_id, where=where)["path"], [1, 0])
+
+    def test_next_item_where_without_match_keeps_cursor(self):
+        tools.set_cursor(self.tree_id, [1])
+        result = tools.next_item(self.tree_id, where={"status": "blocked"})
+        self.assertEqual(result, {"item": None, "path": [1], "child_count": 0})
+        self.assertEqual(tools.get_cursor(self.tree_id), [1])
+
+    def test_next_item_update_current_and_advance_in_one_call(self):
+        tools.set_cursor(self.tree_id, [0, 1])
+        result = tools.next_item(self.tree_id, where={"status$ne": "done"}, update_current={"status": "done"})
+        self.assertEqual(result["path"], [1])
+        self.assertEqual(tools.get_item_by_path(self.tree_id, [0, 1])["status"], "done")
+
+    def test_root_modifications_persist(self):
+        tools.modify_item(self.tree_id, [], key="title", value="ALL")
+        tools.next_item(self.tree_id, update_current={"note": "x"})
+        root = tools.get_tree(self.tree_id)["data"]
+        self.assertEqual((root["title"], root["note"]), ("ALL", "x"))
+        tree = tools.save_tree({"title": "empty"}, "tasks", "title")["tree_id"]
+        tools.add_child(tree, [], {"title": "first"})
+        self.assertEqual(tools.get_tree(tree)["data"]["tasks"], [{"title": "first"}])
+
+    def test_cursor_move_does_not_rewrite_tree_file(self):
+        tree_file = storage._tree_file_path(Path(self.temp_dir.name), self.tree_id)
+        before = tree_file.read_text()
+        tools.next_item(self.tree_id)
+        tools.next_item(self.tree_id)
+        tools.set_cursor(self.tree_id, [1])
+        self.assertEqual(tree_file.read_text(), before)
+        self.assertEqual(tools.get_tree(self.tree_id)["cursor_path"], [1])
+        # Saving the tree keeps the cursor
+        tools.modify_item(self.tree_id, [1], key="status", value="done")
+        self.assertEqual(tools.get_cursor(self.tree_id), [1])
+
+    def test_legacy_cursor_in_tree_file_and_delete_removes_cursor_file(self):
+        store_dir = Path(self.temp_dir.name)
+        tree_file = storage._tree_file_path(store_dir, self.tree_id)
+        cursor_file = storage._cursor_file_path(store_dir, self.tree_id)
+        cursor_file.unlink()
+        entry = json.loads(tree_file.read_text())
+        entry["cursor_path"] = [1, 0]
+        tree_file.write_text(json.dumps(entry))
+        self.assertEqual(tools.get_cursor(self.tree_id), [1, 0])
+        self.assertEqual(tools.next_item(self.tree_id)["path"], [])
+        tools.delete_tree(self.tree_id)
+        self.assertFalse(cursor_file.exists())
+        with self.assertRaises(KeyError):
+            tools.set_cursor(self.tree_id, [])
