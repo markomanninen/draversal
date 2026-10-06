@@ -257,6 +257,38 @@ Claude Code agent teams).
 
 A human view is a separate layer built on the store, not part of the core library.
 
+## Multi-agent field tests
+
+Run on 2026-10-07 with real agents connected to the same store over MCP. Each
+agent ran non-interactively (`claude -p`, `codex exec`) with its own named cursor.
+
+**Test 1: 3 agents** (Claude, Claude Haiku, Codex `gpt-5.5`).
+- Work: 9 glossary terms. After each term, the agent added 1 to a shared root
+  counter and appended to a root log by reading, then writing with `if_hash`.
+- Result: everything was consistent. 2 conflicts were caught and retried, and
+  no updates were lost.
+
+**Test 2: 4 agents** (Claude, Haiku, Codex `gpt-5.5`, Codex `gpt-6-luna`).
+- Tree: 3 levels with 18 subtasks.
+- Work: after each subtask, the agent updated the task counter, then the project
+  counter, then the root counter and log, each with `if_hash` and a retry.
+- Result:
+  - 10 conflicts were caught at the task, project and root levels.
+  - No write overwrote another agent's write.
+  - Subtasks and tasks were all correct.
+  - One project counter was one short and the root had 15 of 18 log entries.
+- Cause: the session transcript shows that `gpt-6-luna` skipped steps of the
+  protocol. It skipped the root update whenever a task was not finished, and it
+  abandoned one project retry after a conflict.
+- **Lesson:** locking and hashes protect the data, but not against an agent that
+  skips steps of a long bookkeeping protocol. Smaller models are more likely to do this.
+
+**Changes made as a result:**
+- `apply_tree_ops` gained atomic `increment` and `append`, so shared counters
+  and logs need no read, hash or retry.
+- `get_item` gained `counts` and `counts_where`, so rollups are computed on read
+  rather than kept by agents. This matches the free-form field principle above.
+
 ## MCP SDK 2.x
 
 Assessed on 2026-10-07 against the

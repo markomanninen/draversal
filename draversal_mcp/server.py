@@ -354,9 +354,15 @@ def get_item(
     path: Optional[List[int]] = None,
     depth: int = 0,
     cursor: Optional[str] = None,
+    counts: Optional[List[str]] = None,
+    counts_where: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Return {item, path, child_count, hash} at path, or at the (named) cursor if path is omitted. depth as in next_item."""
-    return tools.get_item(tree_id, path=path, depth=depth, cursor=cursor)
+    """Return {item, path, child_count, hash} at path, or at the (named) cursor if path is omitted. depth as in next_item.
+
+    counts: fields to tally over descendants, e.g. ["status"] -> {"counts": {"status": {"done": 5, "todo": 3}}};
+    counts_where limits the tally, e.g. {"kind": "subtask"}. Use it instead of maintaining rollup counters.
+    """
+    return tools.get_item(tree_id, path=path, depth=depth, cursor=cursor, counts=counts, counts_where=counts_where)
 
 
 @mcp.tool()
@@ -446,7 +452,9 @@ def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     ops items: {"op": "add_child", "path": parent, "item": {...}},
     {"op": "insert_child", "path": parent, "index": i, "item": {...}},
     {"op": "modify", "path": p, "changes": {...}}, {"op": "replace_child", "path": p, "item": {...}},
-    {"op": "delete_child", "path": p}. The cursors follow inserts and deletes.
+    {"op": "delete_child", "path": p}, {"op": "increment", "path": p, "field": f, "by": 1},
+    {"op": "append", "path": p, "field": f, "value": v}. increment/append are atomic (no conflicts);
+    "results" gives their new values. The cursors follow inserts and deletes.
     Add "if_hash" (from a read) to any op to reject the whole batch if that item changed meanwhile.
     """
     return tools.apply_tree_ops(tree_id, ops)

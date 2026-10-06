@@ -711,3 +711,86 @@ class TestMcpEditPolicy(unittest.TestCase):
         with self.assertRaises(ValueError):
             tools.save_tree(self.data, "features", "title", policy={"editable_fields": "passes"})
         self.assertEqual(tools.get_tree(self.tree_id, include_data=False)["policy"], {"editable_fields": ["passes"], "lock_structure": True})
+
+
+def _complete_with_atomic_ops(store_path, tree_id, agent, rounds):
+    # Runs in a separate process: bump a shared counter and log without reading first
+    os.environ["DRAVERSAL_MCP_STORE_PATH"] = store_path
+    for i in range(rounds):
+        tools.apply_tree_ops(tree_id, [
+            {"op": "increment", "path": [], "field": "completed"},
+            {"op": "append", "path": [], "field": "log", "value": f"{agent}-{i}"},
+        ])
+
+
+class TestMcpAtomicOpsAndCounts(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        data = {"title": "Plan", "kind": "root", "items": [
+            {"title": "P", "kind": "project", "status": "open", "items": [
+                {"title": "T", "kind": "task", "status": "open", "items": [
+                    {"title": "S1", "kind": "subtask", "status": "done", "passes": True},
+                    {"title": "S2", "kind": "subtask", "status": "todo", "passes": False},
+                ]},
+                {"title": "U", "kind": "task", "status": "done", "items": [
+                    {"title": "S3", "kind": "subtask", "status": "done", "passes": True},
+                ]},
+            ]},
+        ]}
+        self.tree_id = tools.save_tree(data, "items", "title")["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def test_increment_and_append(self):
+        result = tools.apply_tree_ops(self.tree_id, [
+            {"op": "increment", "path": [], "field": "completed"},
+            {"op": "increment", "path": [], "field": "completed", "by": 2},
+            {"op": "append", "path": [], "field": "log", "value": "a"},
+            {"op": "append", "path": [], "field": "log", "value": {"who": "b"}},
+        ])
+        self.assertEqual([r["value"] for r in result["results"]], [1, 3, 1, 2])
+        root = tools.get_item(self.tree_id, [])["item"]
+        self.assertEqual((root["completed"], root["log"]), (3, ["a", {"who": "b"}]))
+
+    def test_increment_and_append_reject_wrong_types_and_policy(self):
+        for op in (
+            {"op": "increment", "path": [], "field": "title"},
+            {"op": "increment", "path": [], "field": "n", "by": True},
+            {"op": "append", "path": [], "field": "title", "value": 1},
+            {"op": "append", "path": [], "field": "log"},
+            {"op": "increment", "path": [], "field": "items"},
+        ):
+            with self.assertRaises(ValueError, msg=op):
+                tools.apply_tree_ops(self.tree_id, [op])
+        tree_id = tools.save_tree({"title": "r", "n": 0, "c": []}, "c", "title", policy={"editable_fields": ["n"]})["tree_id"]
+        tools.apply_tree_ops(tree_id, [{"op": "increment", "path": [], "field": "n"}])
+        with self.assertRaisesRegex(ValueError, "policy"):
+            tools.apply_tree_ops(tree_id, [{"op": "append", "path": [], "field": "log", "value": 1}])
+
+    def test_concurrent_atomic_updates_lose_nothing(self):
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=4, mp_context=context) as pool:
+            futures = [pool.submit(_complete_with_atomic_ops, self.temp_dir.name, self.tree_id, f"a{i}", 5) for i in range(4)]
+            for future in futures:
+                future.result()
+        root = tools.get_item(self.tree_id, [])["item"]
+        self.assertEqual(root["completed"], 20)
+        self.assertEqual(sorted(root["log"]), sorted(f"a{i}-{j}" for i in range(4) for j in range(5)))
+
+    def test_counts_over_descendants(self):
+        result = tools.get_item(self.tree_id, [], counts="status")
+        self.assertEqual(result["counts"], {"open": 2, "done": 3, "todo": 1})
+        result = tools.get_item(self.tree_id, [], counts="status", counts_where={"kind": "subtask"})
+        self.assertEqual(result["counts"], {"done": 2, "todo": 1})
+        result = tools.get_item(self.tree_id, [0, 0], counts=["status", "passes"])
+        self.assertEqual(result["counts"], {"status": {"done": 1, "todo": 1}, "passes": {"true": 1, "false": 1}})
+        self.assertNotIn("counts", tools.get_item(self.tree_id, []))

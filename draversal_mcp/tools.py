@@ -627,21 +627,57 @@ def prev_item(
     return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash)
 
 
+def _count_values(
+    item: Dict[str, Any],
+    children_field: str,
+    fields: List[str],
+    where: Optional[Dict[str, Any]],
+) -> Dict[str, Dict[str, int]]:
+    # Aggregates computed on read, so agents need not maintain rollup counters
+    query = DictSearchQuery(where) if where else None
+    counts: Dict[str, Dict[str, int]] = {field: {} for field in fields}
+    stack = list(item.get(children_field) or [])
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get(children_field) or [])
+        own = {k: v for k, v in node.items() if k != children_field}
+        if query is not None and not query.execute(own):
+            continue
+        for field in fields:
+            if field in own:
+                value = own[field]
+                key = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
+                counts[field][key] = counts[field].get(key, 0) + 1
+    return counts
+
+
 def get_item(
     tree_id: str,
     path: Optional[List[int]] = None,
     depth: int = 0,
     cursor: Optional[str] = None,
+    counts: Optional[List[str] | str] = None,
+    counts_where: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return the item at the path, or at the cursor when path is not given.
 
     `depth` works as in `next_item`; `cursor` names the cursor to use.
+    `counts` names one or more fields to tally over all descendants, for example
+    "status" gives {"counts": {"todo": 3, "done": 5}}. With several fields the result
+    is {field: {value: n}}. `counts_where` limits the tally to descendants matching a
+    query on their own fields, for example {"kind": "subtask"}.
     """
     entry = _load_tree(tree_id)
+    children_field = entry["children_field"]
     path = entry["cursors"].get(_cursor_name(cursor), []) if path is None else path
-    traversal = DictTraversal(entry["data"], children_field=entry["children_field"])
+    traversal = DictTraversal(entry["data"], children_field=children_field)
     traversal.set_path_as_current(path)
-    return _item_response(traversal.current, traversal.path, entry["children_field"], depth)
+    response = _item_response(traversal.current, traversal.path, children_field, depth)
+    if counts:
+        fields = [counts] if isinstance(counts, str) else list(counts)
+        tallies = _count_values(traversal.current, children_field, fields, counts_where)
+        response["counts"] = tallies[fields[0]] if isinstance(counts, str) else tallies
+    return response
 
 
 def _sort_value(value: Any) -> Tuple[int, Any]:
@@ -820,6 +856,7 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
         for name, path in (entry.get("cursors") or {storage.DEFAULT_CURSOR: entry.get("cursor_path", [])}).items()
     }
     changed: List[Dict[str, Any]] = []
+    results: List[Dict[str, Any]] = []
 
     for op in ops:
         traversal.current, traversal.path = traversal, []
@@ -882,6 +919,33 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
             for cursor_name, cursor in cursors.items():
                 if len(cursor) > len(path) and _is_prefix(path, cursor):
                     cursors[cursor_name] = list(path)
+        elif name in ("increment", "append"):
+            # Read-modify-write on the server under the tree lock, so concurrent
+            # agents need no if_hash or retry for counters and logs
+            field = op.get("field")
+            if not isinstance(field, str) or not field or field == children_field:
+                raise ValueError(f"{name} requires a field name other than the children field.")
+            traversal.set_path_as_current(path)
+            current = traversal.current
+            _check_field_policy(entry, [field])
+            old = current[field] if field in current else None
+            if name == "increment":
+                by = op.get("by", 1)
+                if isinstance(by, bool) or not isinstance(by, (int, float)):
+                    raise ValueError("increment requires a numeric 'by'.")
+                if old is not None and (isinstance(old, bool) or not isinstance(old, (int, float))):
+                    raise ValueError(f"increment: field '{field}' at {path} is not a number.")
+                new = (old or 0) + by
+            else:
+                if "value" not in op:
+                    raise ValueError("append requires a 'value'.")
+                if old is not None and not isinstance(old, list):
+                    raise ValueError(f"append: field '{field}' at {path} is not a list.")
+                new = list(old or []) + [op["value"]]
+            traversal.modify(key=field, value=new)
+            changed.append({k: v for k, v in traversal.current.items() if k != children_field})
+            results.append({"op": name, "path": path, "field": field,
+                            "value": new if name == "increment" else len(new)})
         elif name == "delete_child":
             parent, index, depth = path[:-1], path[-1], len(path) - 1
             # A cursor in the deleted subtree moves to the item before it,
@@ -898,7 +962,11 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
         else:
             raise ValueError(f"Unsupported operation: {name}")
 
-    return _save_traversal(traversal, entry, tree_id, changed_items=changed, cursors=cursors)
+    response = _save_traversal(traversal, entry, tree_id, changed_items=changed, cursors=cursors)
+    if results:
+        # New counter values and list lengths, so callers need no extra read
+        response["results"] = results
+    return response
 
 
 POLICY_KEYS = {"editable_fields", "readonly_fields", "lock_structure"}
@@ -947,6 +1015,10 @@ def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     - add_child {path: parent, item}, insert_child {path: parent, index, item}
     - modify {path, changes} or {path, key, value}
     - replace_child {path, item}, delete_child {path}
+    - increment {path, field, by=1}: add to a number (a missing field counts as 0)
+    - append {path, field, value}: add a value to a list (a missing field starts empty)
+    increment and append run atomically on the server, so they never conflict;
+    the response lists their new values (for append, the new length) in "results".
     Any op may carry "if_hash": the hash of the item at its path as last read. If the
     item changed, or the path now points to another item, the whole batch is rejected.
     Only changed items are validated, and the stored cursors follow inserts and deletes.

@@ -111,8 +111,13 @@ further below. That set has 35 tools and is about 3,200 tokens.
     entering its subtree, or to the parent.
 - `prev_item`: Move the cursor back. It takes the same options and returns the same response as `next_item`.
 - `set_cursor`: Set the cursor path.
-- `get_item`: `{item, path, child_count}` at a path, or at the cursor when `path`
-  is omitted; `depth` as above.
+- `get_item`: `{item, path, child_count, hash}` at a path, or at the cursor when `path`
+  is omitted; `depth` as above. `counts` tallies fields over all descendants:
+  - `counts=["status"]` returns `{"counts": {"status": {"done": 5, "todo": 3}}}`.
+  - `counts_where` limits the tally, for example `{"kind": "subtask"}`.
+  - Non-string values such as `true` are tallied by their JSON text.
+
+  Use this rather than keeping rollup counters in parent items.
 - `search`: Returns `{matches: [{item, path}], total}`. Matched items do not include children.
   - `text`: label substring, or a regular expression with `regex=true`.
   - `titles`: an ordered chain of labels from the root, for example `["Project", "Task"]`.
@@ -131,6 +136,12 @@ further below. That set has 35 tools and is about 3,200 tokens.
   - `{"op": "modify", "path": p, "changes": {...}}`
   - `{"op": "replace_child", "path": p, "item": {...}}`
   - `{"op": "delete_child", "path": p}`
+  - `{"op": "increment", "path": p, "field": f, "by": 1}`: adds to a number; a missing field counts as 0.
+  - `{"op": "append", "path": p, "field": f, "value": v}`: adds to a list; a missing field starts empty.
+
+  `increment` and `append` read and write on the server under the tree lock, so
+  concurrent agents never conflict on shared counters and logs and need no `if_hash`
+  or retry. The response's `results` lists the new values (for `append`, the new length).
 
 Paths are lists of child indices from the root; negative indices count from the end.
 
