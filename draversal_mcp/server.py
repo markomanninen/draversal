@@ -32,7 +32,18 @@ def _legacy_tool(fn):
     return mcp.tool()(fn) if TOOLSET == "all" else fn
 
 
-@mcp.tool()
+# DRAVERSAL_MCP_TOOLS=worker exposes only what an agent working through a tree needs:
+# fewer tokens per request, and no way to replace or delete the tree
+WORKER_TOOLS = {"next_item", "get_item", "search", "set_cursor", "apply_tree_ops"}
+
+
+def _tool(fn):
+    if TOOLSET == "worker" and fn.__name__ not in WORKER_TOOLS:
+        return fn
+    return mcp.tool()(fn)
+
+
+@_tool
 def validate_tree(
     tree_id: str,
 ) -> Dict[str, Any]:
@@ -40,7 +51,7 @@ def validate_tree(
     return tools.validate_tree(tree_id)
 
 
-@mcp.tool()
+@_tool
 def visualize_tree(
     tree_id: str,
     from_root: bool = False,
@@ -284,13 +295,13 @@ def get_cursor(tree_id: str, cursor: Optional[str] = None) -> List[int]:
     return tools.get_cursor(tree_id, cursor=cursor)
 
 
-@mcp.tool()
+@_tool
 def set_cursor(tree_id: str, path: List[int], cursor: Optional[str] = None) -> Dict[str, Any]:
     """Set the stored cursor path; cursor names an independent cursor."""
     return tools.set_cursor(tree_id, path, cursor=cursor)
 
 
-@mcp.tool()
+@_tool
 def next_item(
     tree_id: str,
     skip_children: bool = False,
@@ -333,7 +344,7 @@ def next_item(
     )
 
 
-@mcp.tool()
+@_tool
 def prev_item(
     tree_id: str,
     skip_children: bool = False,
@@ -366,7 +377,7 @@ def prev_item(
     )
 
 
-@mcp.tool()
+@_tool
 def get_item(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -383,7 +394,7 @@ def get_item(
     return tools.get_item(tree_id, path=path, depth=depth, cursor=cursor, counts=counts, counts_where=counts_where)
 
 
-@mcp.tool()
+@_tool
 def search(
     tree_id: str,
     text: Optional[str] = None,
@@ -418,7 +429,7 @@ def search(
     )
 
 
-@mcp.tool()
+@_tool
 def save_tree(
     data: Dict[str, Any],
     children_field: str,
@@ -451,25 +462,25 @@ def save_tree(
     return {k: v for k, v in saved.items() if k != "schema"}
 
 
-@mcp.tool()
+@_tool
 def get_tree(tree_id: str, include_data: bool = False) -> Dict[str, Any]:
     """Fetch tree metadata (count, top_labels, cursor_path, schema); include_data=true adds the whole tree."""
     return tools.get_tree(tree_id, include_data=include_data)
 
 
-@mcp.tool()
+@_tool
 def list_trees(limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """List stored trees without payload data."""
     return tools.list_trees(limit=limit)
 
 
-@mcp.tool()
+@_tool
 def delete_tree(tree_id: str) -> Dict[str, Any]:
     """Delete a stored tree by id."""
     return tools.delete_tree(tree_id)
 
 
-@mcp.tool()
+@_tool
 def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Edit a tree in one call; ops run in order and are saved together.
 

@@ -8,6 +8,7 @@
 # Needs: draversal-mcp on PATH (pip install 'draversal[mcp]'), the `claude` CLI for
 # claude/haiku, and the `codex` CLI for codex/luna (CODEX_BIN overrides the path).
 # Models: CODEX_MODEL (default gpt-5.5) and LUNA_MODEL (default gpt-6-luna).
+# DRAVERSAL_TOOLSET picks the server's tool set for the agents (default: worker).
 # Each agent makes real model calls: one run of four agents used 1.3-4.2 M input tokens.
 set -euo pipefail
 
@@ -21,7 +22,9 @@ SERVER="$(command -v draversal-mcp)"
 RUN="$HERE/runs/$TEST-$(date +%Y%m%d-%H%M%S)"
 
 mkdir -p "$RUN"
-printf '{"mcpServers":{"draversal":{"type":"stdio","command":"%s","args":[]}}}\n' "$SERVER" > "$RUN/mcp.json"
+TOOLSET="${DRAVERSAL_TOOLSET:-worker}"
+printf '{"mcpServers":{"draversal":{"type":"stdio","command":"%s","args":[],"env":{"DRAVERSAL_MCP_TOOLS":"%s"}}}}\n' \
+  "$SERVER" "$TOOLSET" > "$RUN/mcp.json"
 python3 "$HERE/field_test.py" setup "$TEST"
 date +%T > "$RUN/start.txt"
 
@@ -44,6 +47,7 @@ for agent in "${AGENTS[@]}"; do
         # --ignore-user-config leaves out the user's other MCP servers and plugins
         timeout 1200 "$CODEX_BIN" exec --skip-git-repo-check --ignore-user-config -m "$model" -s read-only \
           -c "mcp_servers.draversal.command=\"$SERVER\"" \
+          -c "mcp_servers.draversal.env={DRAVERSAL_MCP_TOOLS=\"$TOOLSET\"}" \
           -c 'mcp_servers.draversal.default_tools_approval_mode="approve"' \
           -o out.txt "$(cat prompt.txt)" < /dev/null > /dev/null 2> err.txt || true
         ;;

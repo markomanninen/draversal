@@ -949,6 +949,19 @@ class TestProjectStore(unittest.TestCase):
         self.assertIsNone(storage.find_project_store())
 
 
+class TestServerWorkerToolset(unittest.TestCase):
+    def test_worker_toolset_lists_only_work_tools(self):
+        import subprocess
+        import sys
+        code = ("import asyncio; from draversal_mcp.server import mcp; "
+                "print(','.join(sorted(t.name for t in asyncio.run(mcp.list_tools()))))")
+        env = {**os.environ, "DRAVERSAL_MCP_TOOLS": "worker"}
+        result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+        if "mcp is required" in result.stderr:
+            self.skipTest("mcp is not installed")
+        self.assertEqual(result.stdout.strip(), "apply_tree_ops,get_item,next_item,search,set_cursor")
+
+
 class TestServerInstructions(unittest.TestCase):
     def test_instructions_describe_the_safe_loop(self):
         try:

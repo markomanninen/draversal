@@ -80,9 +80,14 @@ Restart clients after updating config files.
 ## Tools
 
 Tool definitions are sent to the model with every request, so the server exposes
-a compact core set by default: 12 tools, about 1,300 tokens. Set
+a compact core set by default: 12 tools, about 2,100 tokens plus about 200 tokens of instructions. Set
 `DRAVERSAL_MCP_TOOLS=all` to also expose the older fine-grained tools listed
-further below. That set has 35 tools and is about 3,200 tokens.
+further below. That set has 35 tools and is about 4,000 tokens.
+
+`DRAVERSAL_MCP_TOOLS=worker` exposes only the five tools an agent needs to work
+through a tree: `next_item`, `get_item`, `search`, `set_cursor` and `apply_tree_ops`.
+That is about 1,300 tokens instead of 2,100. A worker also cannot replace, delete
+or re-validate the tree. Give the full set to the agent or person who sets the tree up.
 
 ### Core tools
 
