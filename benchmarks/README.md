@@ -57,6 +57,13 @@ Requirements:
 - the `claude` and `codex` CLIs, signed in
 - for Codex, a model the account can use (`CODEX_MODEL`, `LUNA_MODEL`)
 
+Agents run with a minimal tool set. Claude Code gets `--tools ""`, which drops its 32
+built-in tools and cuts the context of each request from about 30,600 to about 10,400
+tokens. Codex gets `--ignore-user-config`, which leaves out the user's other MCP servers
+and plugins and cuts each request from about 18,100 to about 15,900 tokens. The field
+tests reported in `docs/background.md` ran before this change, with the full default
+tool sets.
+
 The runs make real model calls: one four-agent run used 1.3–4.2 million input tokens,
 about 95 % of them cached. Run output goes to `benchmarks/field_test/runs/`, which git
 ignores.

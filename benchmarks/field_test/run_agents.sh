@@ -34,15 +34,18 @@ for agent in "${AGENTS[@]}"; do
       claude|haiku)
         model=()
         [ "$agent" = haiku ] && model=(--model haiku)
-        timeout 1200 claude -p "$(cat prompt.txt)" ${model[@]+"${model[@]}"} --strict-mcp-config \
+        # --tools "" drops Claude Code's 32 built-in tools: ~30 k -> ~10 k input tokens per request
+        timeout 1200 claude -p "$(cat prompt.txt)" ${model[@]+"${model[@]}"} --tools "" --strict-mcp-config \
           --mcp-config "$RUN/mcp.json" --allowedTools mcp__draversal > out.txt 2> err.txt || true
         ;;
       codex|luna)
         model="${CODEX_MODEL:-gpt-5.5}"
         [ "$agent" = luna ] && model="${LUNA_MODEL:-gpt-6-luna}"
-        timeout 1200 "$CODEX_BIN" exec --skip-git-repo-check -m "$model" -s read-only \
+        # --ignore-user-config leaves out the user's other MCP servers and plugins
+        timeout 1200 "$CODEX_BIN" exec --skip-git-repo-check --ignore-user-config -m "$model" -s read-only \
+          -c "mcp_servers.draversal.command=\"$SERVER\"" \
           -c 'mcp_servers.draversal.default_tools_approval_mode="approve"' \
-          -o out.txt "$(cat prompt.txt)" > /dev/null 2> err.txt || true
+          -o out.txt "$(cat prompt.txt)" < /dev/null > /dev/null 2> err.txt || true
         ;;
     esac
     date +%T > end.txt
