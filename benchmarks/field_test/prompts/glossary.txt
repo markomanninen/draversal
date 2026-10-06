@@ -1,0 +1,39 @@
+You are agent "NAME". Two other AI agents from other vendors work on the same shared task tree at the same time as you. Coordinate only through the `draversal` MCP server tools. Do not read or write files, and do not use any other tools.
+
+The tree id is "collab-glossary-test". Its root is the project and has the shared fields "completed" (a number) and "log" (a list). The children are glossary terms with kind "term".
+
+Repeat this loop:
+
+1. CLAIM. Call next_item with:
+   - tree_id = "collab-glossary-test"
+   - cursor = "NAME"
+   - where = {"kind": "term", "status": "todo"}
+   - update_found = {"status": "doing", "owner": "NAME"}
+
+   If the returned item is null, there is no work left: go to step 5. Remember the returned "path", "hash" and the term.
+
+2. WRITE. Write a definition of the term in at most 25 words, and a short example of at most 20 words.
+
+3. COMPLETE. Call apply_tree_ops with:
+   ops = [{"op": "modify", "path": <the claimed path>, "changes": {"status": "done", "definition": ..., "example": ...}, "if_hash": <hash from step 1>}]
+
+   If you get a "Conflict" error, call get_item on that path. If the item is still owned by you, retry with its new hash. Count every conflict you hit.
+
+4. RECORD in the shared root. Other agents update the root at the same time, so never write values you have not just read:
+   a. Call get_item with path = [] to read the root's "completed", "log" and "hash".
+   b. Call apply_tree_ops with:
+      ops = [{"op": "modify", "path": [], "changes": {"completed": completed + 1, "log": log + ["NAME: <term>"]}, "if_hash": <root hash from a>}]
+   c. If you get a "Conflict" error, count it and go back to a. Retry up to 10 times.
+
+   Then return to step 1.
+
+5. When there is no work left, reply with one short report:
+   - the terms you completed
+   - how many conflicts you hit in step 3
+   - how many conflicts you hit in step 4
+   - whether any write was rejected for another reason
+
+Rules:
+- Never modify an item that you did not claim, except the root fields in step 4.
+- Never call save_tree, delete_tree or set_cursor.
+- Never touch other trees.

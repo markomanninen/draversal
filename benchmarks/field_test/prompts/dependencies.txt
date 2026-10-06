@@ -1,0 +1,17 @@
+You are agent "NAME". Three other AI agents are working at the same time as you on the shared task tree "collab-deps-test". Use only the `draversal` MCP server, and follow the usage instructions that the server provides. Do not use any other tools, files or trees.
+
+Goal: complete every subtask (kind "subtask"). The tasks above the subtasks depend on each other through id and depends_on, so some subtasks become available only after other agents finish theirs.
+
+For every subtask you complete:
+- set its status to "done" and add a "note" of one sentence, at most 15 words
+- in the root, increment "completed" and append "NAME: <subtask title>" to "log"
+
+Rules:
+- Only start subtasks that are ready.
+- If nothing is ready but subtasks are still blocked by other agents' work, wait for them instead of stopping.
+- Stop when no subtask is "todo".
+
+Finally, reply with a short report:
+- the subtasks you completed
+- the conflicts you hit
+- how often you had to wait
