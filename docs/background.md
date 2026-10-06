@@ -321,6 +321,18 @@ agent ran non-interactively (`claude -p`, `codex exec`) with its own named curso
 | 3 (4 agents, atomic ops) | 18 | 1,330,477 | 1,260,162 | 7,194 | 74k |
 | 4 (4 agents, dependencies + waits) | 16 | 1,620,050 | 1,534,417 | 10,858 | 101k |
 
+**Test 4 again, with minimal tool sets.**
+- Setup: Claude Code ran with `--tools ""` (none of its 32 built-in tools), Codex
+  ran with only draversal (no other MCP servers or plugins), and draversal served
+  its 5-tool `worker` profile.
+- Result: correct again (16/16, dependency order kept) in 41 s, with 47 model
+  requests.
+- Input fell from 1,620,050 to 709,817 tokens (−56 %), and the average per request
+  from 28.9k to 15.1k.
+- The first request of the Claude agent shrank from 34.5k to 6.5k tokens and Haiku's
+  from 30.8k to 10.2k. The Codex agents shrank only from about 16k to about 14k, because
+  Codex loads MCP tools lazily and most of its context is its own instructions.
+
 Atomic operations cut tokens per item by a factor of 3.2 between tests 2 and 3. Most
 input is the agent harness re-sending its own context on every turn. Claude Code agents
 used 400–550k input tokens each in tests 3–4, and Codex agents 180–390k.
