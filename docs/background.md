@@ -174,6 +174,86 @@ others. Examples:
 - **The legacy single-file store** (`trees.json`) still rewrites the whole store
   when the cursor moves.
 
+## Agents with their own task management
+
+Researched on 2026-10-07. Most sources are product docs and issue trackers.
+Some points come from secondary sources and are marked as such.
+
+### Built-in task tools are getting lighter
+
+| Agent | Built-in tool | Persists across sessions |
+|---|---|---|
+| Claude Code | Tasks: flat, with `blocks`/`blockedBy`; one JSON file per task in `~/.claude/tasks` | Yes; can be shared with `CLAUDE_CODE_TASK_LIST_ID`. Several open issues report tasks lost on compaction or resume. |
+| Codex CLI | `update_plan`: flat, resent in full on every update | No. Made opt-in in August 2026 ([PR #41744](https://github.com/openai/codex/pull/41744)). |
+| Gemini CLI | `write_todos`: flat, replaced in full | No, session only ([docs](https://geminicli.com/docs/tools/todos)) |
+| Cursor, Copilot (VS Code), Roo Code | Flat todo list, replaced in full | No, session only |
+| Cline | Focus Chain | Deprecated as "no longer providing enough additional benefit" ([deprecations](https://docs.cline.bot/resources/deprecations)) |
+| Kiro | `tasks.md` in `.kiro/specs/<feature>/`, about 2 levels | Yes, as repository files ([specs](https://kiro.dev/docs/specs)) |
+
+The Claude docs say newer models track multi-step work without a written todo
+list. Claude Code turns its task tools off by default on the newest models
+([tools reference](https://code.claude.com/docs/en/tools-reference#task-tool-availability),
+[Agent SDK todo tracking](https://code.claude.com/docs/en/agent-sdk/todo-tracking)).
+**Within-session todo lists are therefore covered, and draversal is not needed for them.**
+
+### Long-running work still needs external, structured state
+
+- **Anthropic's [long-running agent harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)**
+  - Keep a JSON feature list with a `passes` flag per item, a progress file, and git commits.
+  - JSON, because "the model is less likely to inappropriately change or overwrite JSON files compared to Markdown files".
+  - Agents may only flip `passes`, and every session makes incremental progress and leaves structured updates.
+  - The [prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)
+    recommend structured formats such as JSON for state data.
+- **[Beads](https://github.com/steveyegge/beads)** is an issue tracker for agents.
+  - Hierarchical ids, typed dependencies, `bd ready` for unblocked work, and atomic claim.
+  - Its author argues that agents only know what is on disk, and that Markdown plans lack dependencies, priorities and machine-readable structure.
+  - [Criticism](https://rufuspollock.com/2026-02-23-issue-tracking-dilemma): it is heavy (a daemon, git hooks, many commands), and the storage migration broke installs.
+- **Other tools**
+  - [Backlog.md](https://github.com/MrLesk/Backlog.md) adds a Kanban board for humans.
+  - Linear and GitHub MCPs connect agents to team trackers.
+  - Taskmaster and Shrimp add decomposition and dependencies, and are criticised for their token overhead.
+- **Evidence:** a single August 2026 paper (LongHorizon-Harness, not replicated)
+  reports large gains from keeping verified task state outside the agent, for
+  example Terminal-Bench from 69.7 % to 77.2 %.
+- **Unverified:** secondary sources claim that Manus spent about a third of its
+  actions on todo bookkeeping, and that Beads inspired Claude Code Tasks.
+
+### Where draversal fits
+
+**Strengths:**
+- **Works with any agent.** The same tree works in Claude Code, Codex, Gemini CLI
+  and VS Code. Claude Code Tasks is visible only to Claude Code, and the other
+  agents keep nothing across sessions.
+- **Arbitrary depth and any JSON shape.** One store can hold feature lists, test
+  matrices, research outlines or book chapters.
+- **Schema validation at the tool boundary.** This enforces Anthropic's
+  "structured state" advice instead of relying on the prompt.
+- **Economy.** A cursor, filtered `next_item` and single-item responses avoid
+  whole-list rewrites.
+
+**Gaps:**
+- No dependency or "ready" detection.
+- Multi-agent safety: no locking, no claim, one cursor per tree. Addressed by
+  named cursors, store locking and `update_found` (see below).
+- The store is outside the repository and not diff-friendly.
+- No human view.
+- Agents only use an external tool reliably when AGENTS.md or CLAUDE.md names
+  it as the source of truth and the built-in planner is turned off.
+
+**Verdict:** draversal is useful as a lightweight, vendor-neutral store for
+structured state that outlives sessions and agents. It does not replace a team
+tracker (Linear, GitHub) or a multi-agent work queue with dependencies (Beads,
+Claude Code agent teams).
+
+**Planned in this order:**
+1. Named cursors per agent, store locking, and claiming the item a cursor moves to.
+2. Per-tree field policy, for example "only `passes` may change", so the harness rule is enforced.
+3. An optional `ready` filter based on `depends_on` ids.
+4. An agent-instruction snippet for AGENTS.md and CLAUDE.md.
+5. A repository-local store option.
+
+A human view is a separate layer built on the store, not part of the core library.
+
 ## MCP SDK 2.x
 
 Assessed on 2026-10-07 against the
