@@ -64,6 +64,12 @@ def _write_cursor(store_dir: Path, tree_id: str, cursor: List[int]) -> None:
     tmp_path.replace(cursor_path)
 
 
+def _dumps(data: Dict[str, Any]) -> str:
+    # Compact JSON: indentation made writes of large trees about twice as slow.
+    # Use an editor or `jq .` to view store files formatted.
+    return json.dumps(data, separators=(",", ":"))
+
+
 def _load_store(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {"version": 1, "trees": {}}
@@ -83,7 +89,7 @@ def _load_store(path: Path) -> Dict[str, Any]:
 def _write_store(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(data, indent=2))
+    tmp_path.write_text(_dumps(data))
     tmp_path.replace(path)
 
 
@@ -100,7 +106,7 @@ def _load_tree_file(path: Path) -> Dict[str, Any]:
 def _write_tree_file(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(data, indent=2))
+    tmp_path.write_text(_dumps(data))
     tmp_path.replace(path)
 
 

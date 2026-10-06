@@ -101,9 +101,10 @@ state after both optimization rounds.
 |---|---:|---:|---:|---:|
 | `next_item` | 12–20 | 2.5 | 74–132 | 9.8 |
 | `next_item` response, moving onto a project | 6,848 chars | 144 | 24,735 chars | 144 |
-| `modify_item` | 47 | 9.1 | 386 | 63 |
+| `modify_item` | 47 | 4.5 | 386 | 16 |
 | `modify_item` response | 852 chars | 123 | 1,064 chars | 125 |
-| complete current item and go to the next open one | 2+ calls | 1 call, 11 ms | 2+ calls | 1 call, 64 ms |
+| complete current item and go to the next open one | 2+ calls | 1 call, 4.4 ms | 2+ calls | 1 call, 17 ms |
+| store file size | 325 kB | 120 kB | 2.9 MB | 1.1 MB |
 | tool definitions sent with every model request | ~3,500 tokens (33 tools) | ~1,300 tokens (12 tools) | | |
 
 The traversal step itself takes 0.002 ms. Storage, validation and response
@@ -134,7 +135,11 @@ size are the real cost.
    Generated `title` and `anyOf null` entries are removed from the advertised
    schemas. Together this takes the tool definitions from about 3,500 to about
    1,300 tokens. `DRAVERSAL_MCP_TOOLS=all` keeps the older tools available.
-8. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
+8. **Store files are written as compact JSON.** Indentation took about 48 ms of
+   a 63 ms write on 11k nodes and made files 2.7x larger. Nothing reads store
+   files by hand. To view one formatted, use an editor (for example *Format
+   Document* in VS Code) or `jq .`. Older indented files are still read as before.
+9. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
    because the 2.x SDK removed `FastMCP`.
 
 ### Design principle: free-form fields
@@ -151,10 +156,9 @@ others. Examples:
 
 ### Remaining opportunities
 
-- **Writing the tree file.** On an 11k-node tree most of the remaining 63 ms of a
-  write is `json.dumps(indent=2)` (about 48 ms) of the whole 2.9 MB file. Compact
-  JSON, or one file per subtree, would cut that. The trade-off is less readable
-  store files.
+- **Writing the tree file.** Every write still serializes the whole tree
+  (about 1 MB and roughly 10 ms on 11k nodes). Only very large lists would
+  benefit from one file per subtree or an append-only change log.
 - **`visualize_tree` output** is the whole tree (240k characters on 11k nodes). A
   `max_depth` or subtree limit would keep it usable for large lists.
 - **Ordering by field.** `where` filters, but the cursor always follows tree
