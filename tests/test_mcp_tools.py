@@ -430,6 +430,23 @@ class TestMcpCoreTools(unittest.TestCase):
         with self.assertRaises(ValueError):
             tools.next_item(self.tree_id, peek=True, update_current={"status": "done"})
 
+    def test_visualize_tree_limits(self):
+        self.assertEqual(tools.visualize_tree(self.tree_id, max_depth=1).split("\n"), ["All*", "├── A (+2)", "├── B", "└── C"])
+        cut = tools.visualize_tree(self.tree_id, max_lines=2).split("\n")
+        self.assertEqual(cut[:2], ["All*", "├── A"])
+        self.assertTrue(cut[2].startswith("... 4 more lines"))
+        self.assertEqual(len(tools.visualize_tree(self.tree_id, max_lines=0).split("\n")), 6)
+        self.assertEqual(tools.visualize_tree(self.tree_id, current_path=[0], max_depth=0), "A* (+2)")
+
+    def test_skip_children(self):
+        tools.set_cursor(self.tree_id, [0])
+        self.assertEqual(tools.next_item(self.tree_id, skip_children=True)["path"], [1])
+        tools.set_cursor(self.tree_id, [0, 1])
+        # Past the last child of A it continues on the higher level
+        self.assertEqual(tools.next_item(self.tree_id, skip_children=True)["path"], [1])
+        self.assertEqual(tools.prev_item(self.tree_id, skip_children=True)["path"], [0])
+        self.assertEqual(tools.next_item(self.tree_id, skip_children=True, where={"status": "done"})["path"], [2])
+
     def test_search_modes(self):
         paths = lambda result: [match["path"] for match in result["matches"]]
         self.assertEqual(paths(tools.search(self.tree_id, text="a")), [[0], [0, 0], [0, 1]])

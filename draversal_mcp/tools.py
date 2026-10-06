@@ -202,10 +202,22 @@ def visualize_tree(
     tree_id: str,
     from_root: bool = False,
     current_path: Optional[List[int]] = None,
+    max_depth: Optional[int] = None,
+    max_lines: Optional[int] = 200,
 ) -> str:
-    """Return a tree visualization string for the stored tree."""
+    """Return a tree visualization string for the stored tree.
+
+    `max_depth` limits the levels shown; items with hidden children get a `(+N)` suffix.
+    At most `max_lines` lines are returned (None or 0 for all), followed by a line telling
+    how many were left out.
+    """
     traversal, entry = _get_traversal(tree_id, current_path)
-    return traversal.visualize(label_field=entry.get("label_field"), from_root=from_root)
+    text = traversal.visualize(label_field=entry.get("label_field"), from_root=from_root, max_depth=max_depth)
+    lines = text.split("\n")
+    if max_lines and len(lines) > max_lines:
+        left_out = len(lines) - max_lines
+        lines = lines[:max_lines] + [f"... {left_out} more lines (use max_depth, current_path or a larger max_lines)"]
+    return "\n".join(lines)
 
 
 def traversal_search(
@@ -489,7 +501,7 @@ def _item_response(item: Dict[str, Any], path: List[int], children_field: str, d
 def _move_cursor(
     tree_id: str,
     forward: bool,
-    sibling_only: bool = False,
+    skip_children: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
@@ -510,7 +522,7 @@ def _move_cursor(
     # Visit every item at most once, root included, before giving up
     node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
     for _ in range(node_count if query else 1):
-        move(sibling_only=sibling_only)
+        move(sibling_only=skip_children)
         item = traversal.current
         if query is None or query.execute({k: v for k, v in item.items() if k != children_field}):
             if not peek:
@@ -521,7 +533,7 @@ def _move_cursor(
 
 def next_item(
     tree_id: str,
-    sibling_only: bool = False,
+    skip_children: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
@@ -537,13 +549,15 @@ def next_item(
     `depth` controls how much of the subtree is returned: 0 the item's own fields,
     1 also its direct children, -1 the whole subtree. `child_count` tells how many
     direct children the item has. `peek` returns the item without moving the cursor.
+    `skip_children` moves past the current item's subtree: to the next sibling, or to
+    the next sibling of the nearest ancestor (it does not stop at the end of a parent).
     """
-    return _move_cursor(tree_id, True, sibling_only, where, update_current, depth, peek)
+    return _move_cursor(tree_id, True, skip_children, where, update_current, depth, peek)
 
 
 def prev_item(
     tree_id: str,
-    sibling_only: bool = False,
+    skip_children: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
@@ -551,9 +565,10 @@ def prev_item(
 ) -> Dict[str, Any]:
     """Move the stored cursor to the previous item and return it and its path.
 
-    Accepts the same options as `next_item`.
+    Accepts the same options as `next_item`; with `skip_children` it moves to the
+    previous sibling without entering its subtree, or to the parent when there is none.
     """
-    return _move_cursor(tree_id, False, sibling_only, where, update_current, depth, peek)
+    return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek)
 
 
 def get_item(tree_id: str, path: Optional[List[int]] = None, depth: int = 0) -> Dict[str, Any]:

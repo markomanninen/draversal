@@ -504,7 +504,7 @@ class DictTraversal(dict):
             - If `merge` is True, creates a new `DictTraversal` object with the current item as root.
             - If `merge` is False, creates a deep copy of the current `DictTraversal` object.
             - Yields the new `DictTraversal` object for use within the context.
-            - If `merge` is True, updates the root fields and restores the original path after exiting the context.
+            - If `merge` is True, replaces the current item's fields with the new root's fields (including added and removed fields and children) and restores the original path after exiting the context.
 
         Parameters:
             merge (bool): Whether to merge the changes back to the original object. Default is False.
@@ -538,8 +538,15 @@ class DictTraversal(dict):
             traversal = deepcopy(self)
         yield traversal
         if merge:
-            # Update root fields
-            self.current.update(self._without_children(traversal.items()))
+            # Replace the current item's fields with the new root's fields, so that
+            # removed fields and a children list created inside the block are merged too
+            merged = traversal.data
+            if self.current is self:
+                dict.clear(self)
+                dict.update(self, merged)
+            else:
+                self.current.clear()
+                self.current.update(merged)
             # Restore path
             self.path = old_path
 
@@ -548,13 +555,13 @@ class DictTraversal(dict):
         Retrieves the children of the current item.
 
         Parameters:
-            sibling_only (bool, optional): If True, returns only the siblings of the current item.
+            sibling_only (bool, optional): If True, returns the direct children without their own children.
 
         Returns:
             list: A list of children items.
 
         Behavior:
-            - If sibling_only is True, returns a list of siblings without their children.
+            - If sibling_only is True, returns the direct children without their own children.
             - Otherwise, returns a list of children including their own children.
 
         Example:
@@ -574,7 +581,7 @@ class DictTraversal(dict):
         Retrieves the last item in the current traversal tree from the current item perspective.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, returns the last direct child instead of the deepest last item.
 
         Returns:
             dict: The last item in the traversal.
@@ -596,7 +603,7 @@ class DictTraversal(dict):
         Retrieves the path to the last item in the traversal from the current item perspective.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, returns the path of the last direct child instead of the deepest last item.
 
         Returns:
             list: The path to the last item.
@@ -618,7 +625,7 @@ class DictTraversal(dict):
         Sets the last item in the traversal as the current item from the current item perspective.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, sets the last direct child instead of the deepest last item.
 
         Returns:
             self: Returns the DictTraversal object itself, pointing to the last item.
@@ -641,13 +648,13 @@ class DictTraversal(dict):
         Retrieves the last item and its path in the traversal tree from the current item perspective.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, returns the last direct child instead of the deepest last item.
 
         Returns:
             tuple: A tuple containing the last item (dict) and its path (list).
 
         Behavior:
-            - If sibling_only is True, returns the last sibling and its path.
+            - If sibling_only is True, returns the last direct child and its path.
             - Otherwise, returns the last item in the deepest nested list and its path.
 
         Example:
@@ -843,15 +850,18 @@ class DictTraversal(dict):
         Moves the traversal to the next item.
 
         Parameters:
-            sibling_only (bool, optional): If True, moves only among siblings.
+            sibling_only (bool, optional): If True, does not descend into the current item's children: moves to the next sibling, or to the next sibling of the nearest ancestor that has one.
 
         Returns:
             self: Returns the DictTraversal object itself, pointing to the next item.
 
         Behavior:
             - Moves the traversal to the next item relative to the current item.
-            - If sibling_only is True, moves only among siblings.
+            - If sibling_only is True, skips the current item's children.
             - Will start over beginning after reaching the end.
+            - `sibling_only` navigates as if every subtree were collapsed. It does not stay
+                under the same parent: past the last sibling it continues on a higher level,
+                and past the last top-level item it continues from the root.
 
         Attributes:
             current (dict): Updated to point to the next item in the traversal.
@@ -872,14 +882,17 @@ class DictTraversal(dict):
         Retrieves the next item and its path without altering the state of the object.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, does not descend into the current item's children: moves to the next sibling, or to the next sibling of the nearest ancestor that has one.
 
         Returns:
             tuple: A tuple containing the next item (dict) and its path (list).
 
         Behavior:
             - Retrieves the next item and its path relative to the current item.
-            - If sibling_only is True, returns the next sibling and its path.
+            - If sibling_only is True, skips the current item's children.
+            - `sibling_only` navigates as if every subtree were collapsed. It does not stay
+                under the same parent: past the last sibling it continues on a higher level,
+                and past the last top-level item it continues from the root.
 
         Example:
             ```python
@@ -907,18 +920,18 @@ class DictTraversal(dict):
 
     def move_to_prev_item(self, sibling_only=False):
         """
-        Retrieves the previous item and its path without altering the state of the object.
+        Moves the traversal to the previous item.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, does not descend into the previous sibling's children: moves to the previous sibling, or to the parent when there is none.
 
         Returns:
-            tuple: A tuple containing the previous item (dict) and its path (list).
+            self: Returns the DictTraversal object itself, pointing to the previous item.
 
         Behavior:
-            - Retrieves the previous item and its path relative to the current item.
-            - If sibling_only is True, returns the previous sibling and its path.
-            - Will start over the the end after reaching the beginning.
+            - Moves the traversal to the previous item relative to the current item.
+            - If sibling_only is True, does not descend into the previous sibling's children.
+            - Will start over from the end after reaching the beginning.
 
         Example:
             ```python
@@ -935,14 +948,14 @@ class DictTraversal(dict):
         Retrieves the previous item and its path without altering the state of the object.
 
         Parameters:
-            sibling_only (bool, optional): If True, considers only the siblings.
+            sibling_only (bool, optional): If True, does not descend into the previous sibling's children: moves to the previous sibling, or to the parent when there is none.
 
         Returns:
             tuple: A tuple containing the previous item (dict) and its path (list).
 
         Behavior:
             - Retrieves the previous item and its path relative to the current item.
-            - If sibling_only is True, returns the previous sibling and its path.
+            - If sibling_only is True, does not descend into the previous sibling's children.
 
         Example:
             ```python
@@ -1648,18 +1661,20 @@ class DictTraversal(dict):
                 _(indent + 1, item.get(self.children_field, []))
         _(1, that.get(self.children_field, []))
 
-    def visualize(self, label_field=None, from_root=False):
+    def visualize(self, label_field=None, from_root=False, max_depth=None):
         """
         Generates a string representation of the traversal tree.
 
         Behavior:
             - If `from_root` is True, starts the visualization from the root item.
             - If `label_field` is provided, uses it as the label for each item.
-            - Marks the current item with an asterisk (*).
+            - Marks the current item with an asterisk (*). Only the current item is marked, also when other items have the same label.
+            - If `max_depth` is given, items deeper than that are left out, and an item with hidden children gets a `(+N)` suffix, where N is the number of its direct children.
 
         Parameters:
             label_field (str, optional): Field name to be used as the label for each item. Default is None.
             from_root (bool): Whether to start the visualization from the root item. Default is False.
+            max_depth (int, optional): How many levels below the starting item to show. Default is None (all levels).
 
         Returns:
             str: A string representing the traversal tree, with indentation to indicate nesting levels.
@@ -1687,25 +1702,30 @@ class DictTraversal(dict):
             ```
         """
         that = self if from_root else self.current
+        # The current item is marked by identity, so items with the same label are not marked
         current_item = self.current
-        current_title = (current_item[label_field] if label_field in current_item else self._without_children(current_item.items())) if current_item else ''
         # We can not use __getitems__ directly, because it gets values from current item context
         labels = [v for k, v in that.items() if k == label_field]
         item_label = labels[0] if labels else 'Untitled'
-        toc = [item_label + ('*' if item_label == current_title else '')]
+        items = [v for k, v in that.items() if k == self.children_field]
+        items = items[0] if items else []
+
+        def hidden(subitems, level):
+            return f" (+{len(subitems)})" if subitems and max_depth is not None and level >= max_depth else ''
+
+        toc = [item_label + ('*' if that is current_item else '') + hidden(items, 0)]
         def _(items, level=1, prefix=''):
             items_length = len(items[:])
             for i, item in enumerate(items):
                 is_last = i == items_length - 1
                 new_prefix, spacer = ('└── ', '    ') if is_last else ('├── ', '│   ')
                 item_label = item[label_field] if label_field in item else self._without_children(item.items())
-                toc.append(f"{prefix}{new_prefix}{item_label}{'*' if item_label == current_title else ''}")
                 subitems = item.get(self.children_field, [])
-                if subitems:
+                toc.append(f"{prefix}{new_prefix}{item_label}{'*' if item is current_item else ''}{hidden(subitems, level)}")
+                if subitems and not hidden(subitems, level):
                     _(subitems, level + 1, prefix + spacer)
-        items = [v for k, v in that.items() if k == self.children_field]
-        if items:
-            _(items[0])
+        if items and not hidden(items, 0):
+            _(items)
         return '\n'.join(toc)
 
 
@@ -1786,7 +1806,7 @@ def prev(traversal):
 
     Note:
         - Serves as a counterpart to Python's built-in `next` function.
-        - Does not support a `siblings_only` argument; use `move_to_next_item` or `move_to_prev_item` directly for that.
+        - Does not support a `sibling_only` argument; use `move_to_next_item` or `move_to_prev_item` directly for that.
         - Unlike `move_to_next_item` and `move_to_prev_item`, which cycle through the tree, `prev` raises StopIteration when reaching the end.
 
     Example:

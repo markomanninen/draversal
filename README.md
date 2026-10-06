@@ -306,7 +306,7 @@ Moves the traversal to the previous item relative to the current item.
 
 ## Note
 - Serves as a counterpart to Python's built-in `next` function.
-- Does not support a `siblings_only` argument; use `move_to_next_item` or `move_to_prev_item` directly for that.
+- Does not support a `sibling_only` argument; use `move_to_next_item` or `move_to_prev_item` directly for that.
 - Unlike `move_to_next_item` and `move_to_prev_item`, which cycle through the tree, `prev` raises StopIteration when reaching the end.
 
 ## Example
@@ -388,17 +388,6 @@ Resets the traversal to the root item.
  ```python
  root(traversal)  # Returns: {'title': 'root'}
  ```
-
----
-
-
-
-# Method: `translate`
-
-## Description
-Translate a shell PATTERN to a regular expression.
-
-There is no way to quote meta-characters.
 
 ---
 
@@ -631,6 +620,33 @@ Moves the traversal to the next item.
 
 
 
+# Method: `DictTraversal.__setitem__`
+
+## Description
+Sets an item based on the given index, counterpart of `__getitem__`.
+
+## Parameters
+- __idx__ (int, slice, tuple, list, str): The index to set the item.
+- __value__ (any): The value to set.
+## Raises
+- __IndexError__: If children are not found at the given index.
+- __ValueError__: If index type is not supported.
+## Behavior
+ - If index is an int or slice, sets child items of the current item.
+ - If index is a tuple or list, traverses the nested children to set the item.
+ - If index is a string, sets the corresponding attribute in the current item.
+
+## Example
+ ```python
+ traversal.set_path_as_current([1])
+ traversal['title'] = 'CHILD 2'  # Sets the title of the current item, not the root
+ traversal[0] = {'title': 'GRANDCHILD 1'}  # Replaces the first child of the current item
+ ```
+
+---
+
+
+
 # Method: `DictTraversal.add_child`
 
 ## Description
@@ -661,9 +677,9 @@ Adds a new child item to the current item's children.
 Retrieves the children of the current item.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, returns only the siblings of the current item.
+- __sibling_only__ (bool, optional): If True, returns the direct children without their own children.
 ## Behavior
- - If sibling_only is True, returns a list of siblings without their children.
+ - If sibling_only is True, returns the direct children without their own children.
  - Otherwise, returns a list of children including their own children.
 
 ## Example
@@ -721,6 +737,8 @@ Locate items by matching their titles to a list of specified field values.
  - Initializes an empty list `results` to store matching items and their paths.
  - Defines a recursive function `_` to search for items with matching titles.
  - Calls `_` starting from the current item's subitems, passing the list of remaining titles to match.
+ - Every sibling matching a title is followed, so duplicate labels on any level are supported.
+ - Items without the `label_field` are skipped.
  - Appends matching items and their paths to `results`. Items in the result list do not contain childrens.
 
 ## Example
@@ -780,7 +798,7 @@ Retrieves the item located at the specified path in the traversal.
 Retrieves the last item in the current traversal tree from the current item perspective.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, returns the last direct child instead of the deepest last item.
 ## Example
  ```python
  # Under root
@@ -800,9 +818,9 @@ Retrieves the last item in the current traversal tree from the current item pers
 Retrieves the last item and its path in the traversal tree from the current item perspective.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, returns the last direct child instead of the deepest last item.
 ## Behavior
- - If sibling_only is True, returns the last sibling and its path.
+ - If sibling_only is True, returns the last direct child and its path.
  - Otherwise, returns the last item in the deepest nested list and its path.
 
 ## Example
@@ -822,7 +840,7 @@ Retrieves the last item and its path in the traversal tree from the current item
 Retrieves the path to the last item in the traversal from the current item perspective.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, returns the path of the last direct child instead of the deepest last item.
 ## Example
  ```python
  # Under root
@@ -842,10 +860,13 @@ Retrieves the path to the last item in the traversal from the current item persp
 Retrieves the next item and its path without altering the state of the object.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, does not descend into the current item's children: moves to the next sibling, or to the next sibling of the nearest ancestor that has one.
 ## Behavior
  - Retrieves the next item and its path relative to the current item.
- - If sibling_only is True, returns the next sibling and its path.
+ - If sibling_only is True, skips the current item's children.
+ - `sibling_only` navigates as if every subtree were collapsed. It does not stay
+     under the same parent: past the last sibling it continues on a higher level,
+     and past the last top-level item it continues from the root.
 
 ## Example
  ```python
@@ -924,10 +945,10 @@ Retrieves the path to the parent of the current item in the traversal.
 Retrieves the previous item and its path without altering the state of the object.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, does not descend into the previous sibling's children: moves to the previous sibling, or to the parent when there is none.
 ## Behavior
  - Retrieves the previous item and its path relative to the current item.
- - If sibling_only is True, returns the previous sibling and its path.
+ - If sibling_only is True, does not descend into the previous sibling's children.
 
 ## Example
  ```python
@@ -982,7 +1003,8 @@ Context manager for backward traversal.
 
 ## Note
 - This context manager can be nested.
-- The state of `inverted_context` will be restored after exiting each with-block.
+- The state of `inverted_context` will be restored after exiting each with-block,
+also when the block raises an exception.
 ## Example
  ```python
  # Forward traversal (default behavior)
@@ -1050,14 +1072,17 @@ Modifies the current item's attributes.
 Moves the traversal to the next item.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, moves only among siblings.
+- __sibling_only__ (bool, optional): If True, does not descend into the current item's children: moves to the next sibling, or to the next sibling of the nearest ancestor that has one.
 ## Attributes
 - __current__ (dict): Updated to point to the next item in the traversal.
 - __path__ (list): Updated to reflect the new traversal path.
 ## Behavior
  - Moves the traversal to the next item relative to the current item.
- - If sibling_only is True, moves only among siblings.
+ - If sibling_only is True, skips the current item's children.
  - Will start over beginning after reaching the end.
+ - `sibling_only` navigates as if every subtree were collapsed. It does not stay
+     under the same parent: past the last sibling it continues on a higher level,
+     and past the last top-level item it continues from the root.
 
 ## Example
  ```python
@@ -1073,14 +1098,14 @@ Moves the traversal to the next item.
 # Method: `DictTraversal.move_to_prev_item`
 
 ## Description
-Retrieves the previous item and its path without altering the state of the object.
+Moves the traversal to the previous item.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, does not descend into the previous sibling's children: moves to the previous sibling, or to the parent when there is none.
 ## Behavior
- - Retrieves the previous item and its path relative to the current item.
- - If sibling_only is True, returns the previous sibling and its path.
- - Will start over the the end after reaching the beginning.
+ - Moves the traversal to the previous item relative to the current item.
+ - If sibling_only is True, does not descend into the previous sibling's children.
+ - Will start over from the end after reaching the beginning.
 
 ## Example
  ```python
@@ -1108,7 +1133,7 @@ Context manager for temporarily setting a new root for traversal.
  - If `merge` is True, creates a new `DictTraversal` object with the current item as root.
  - If `merge` is False, creates a deep copy of the current `DictTraversal` object.
  - Yields the new `DictTraversal` object for use within the context.
- - If `merge` is True, updates the root fields and restores the original path after exiting the context.
+ - If `merge` is True, replaces the current item's fields with the new root's fields (including added and removed fields and children) and restores the original path after exiting the context.
 
 ## Example
  ```python
@@ -1242,10 +1267,16 @@ Search for items whose label match a given query.
 ## Parameters
 - __query__ (str, DictSearchQuery or re.Pattern): The search query, either a string, DictSearchQuery or a regular expression pattern.
 - __label_field__ (str): Field name to be used as a target of search for each item, if query is `str` or `re.Pattern`. Default is None.
+## Raises
+- __ValueError__: If `label_field` is not given for a `str` or `re.Pattern` query.
 ## Behavior
  - Initializes an empty list `results` to store matching items and their paths.
  - Defines a nested function `_` to recursively search for items with matching titles.
  - Calls `_` starting from the current item's subitems.
+ - Items without `label_field` are skipped, and non-string labels are compared as strings.
+ - With `DictSearchQuery`, each item is queried separately with its own fields (children excluded),
+     so all query keys must match within the same item. The current item itself is included
+     with an empty path.
  - Appends matching items and their paths to `results`.
  - Returns `results`.
 
@@ -1265,7 +1296,7 @@ Search for items whose label match a given query.
 Sets the last item in the traversal as the current item from the current item perspective.
 
 ## Parameters
-- __sibling_only__ (bool, optional): If True, considers only the siblings.
+- __sibling_only__ (bool, optional): If True, sets the last direct child instead of the deepest last item.
 ## Attributes
 - __current__ (dict): Updated to point to the last item in the traversal.
 - __path__ (list): Updated to reflect the new traversal path.
@@ -1304,10 +1335,14 @@ Sets the parent item in the traversal as the current item from the current item 
 Sets the item located at the specified path as the current item in the traversal.
 
 ## Parameters
-- __path__ (list): The path to the item in the traversal, represented as a list of integers.
+- __path__ (list, tuple): The path to the item relative to the current item, represented as a list of integers.
+## Raises
+- __IndexError__: If the item does not exist at the specified path.
+- __ValueError__: If path is not a list or tuple.
 ## Note
 - Updates both `self.current` and `self.path` attributes.
-- If the item does not exist at the specified path, `self.current` and `self.path` are not updated.
+- Path is resolved relative to the current item, like `traversal[path]`, but `self.path`
+is always stored as an absolute path from the root.
 
 ## Example
  ```python
@@ -1326,13 +1361,15 @@ Generates a string representation of the traversal tree.
 ## Parameters
 - __label_field__ (str, optional): Field name to be used as the label for each item. Default is None.
 - __from_root__ (bool): Whether to start the visualization from the root item. Default is False.
+- __max_depth__ (int, optional): How many levels below the starting item to show. Default is None (all levels).
 ## Attributes
 - __current__ (dict): The current item in the traversal.
 - __children_field__ (str): The key used to identify children in the dictionary.
 ## Behavior
  - If `from_root` is True, starts the visualization from the root item.
  - If `label_field` is provided, uses it as the label for each item.
- - Marks the current item with an asterisk (*).
+ - Marks the current item with an asterisk (*). Only the current item is marked, also when other items have the same label.
+ - If `max_depth` is given, items deeper than that are left out, and an item with hidden children gets a `(+N)` suffix, where N is the number of its direct children.
 
 ## Example
  ```python

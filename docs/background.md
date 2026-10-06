@@ -139,7 +139,15 @@ size are the real cost.
    a 63 ms write on 11k nodes and made files 2.7x larger. Nothing reads store
    files by hand. To view one formatted, use an editor (for example *Format
    Document* in VS Code) or `jq .`. Older indented files are still read as before.
-9. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
+9. **`visualize_tree` is bounded.** It takes `max_depth` (hidden children are
+   shown as `(+N)`) and cuts its output at `max_lines` (200 by default). Before, it
+   returned the whole tree: 240k characters on 11k nodes.
+10. **`skip_children` replaces `sibling_only` in the MCP cursor tools.** The old name
+   suggested moving only within the same parent. In fact the cursor moves past the
+   current subtree and continues on a higher level, which is useful for skipping
+   a project's subtasks. The Python API keeps `sibling_only`, with docstrings
+   rewritten to describe the real behaviour.
+11. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
    because the 2.x SDK removed `FastMCP`.
 
 ### Design principle: free-form fields
@@ -159,8 +167,6 @@ others. Examples:
 - **Writing the tree file.** Every write still serializes the whole tree
   (about 1 MB and roughly 10 ms on 11k nodes). Only very large lists would
   benefit from one file per subtree or an append-only change log.
-- **`visualize_tree` output** is the whole tree (240k characters on 11k nodes). A
-  `max_depth` or subtree limit would keep it usable for large lists.
 - **Ordering by field.** `where` filters, but the cursor always follows tree
   order. An optional `order_by` for `search` would allow "highest priority
   first" without new fields.

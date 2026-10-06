@@ -163,5 +163,84 @@ class TestDictTraversalRegressions(unittest.TestCase):
         self.assertEqual([path for _, path in result], [[0], [1], [1, 0]])
 
 
+class TestNewRootMerge(unittest.TestCase):
+
+    def test_merge_adds_children_to_leaf_and_removes_fields(self):
+        traversal = demo().set_path_as_current([0])
+        traversal.modify(extra='x')
+        with traversal.new_root(merge=True) as sub:
+            sub.add_child(title='New')
+            del sub['extra']
+            sub['title'] = 'CHILD 1'
+        self.assertEqual(traversal.data['sections'][0], {'title': 'CHILD 1', 'sections': [{'title': 'New'}]})
+        self.assertEqual(traversal.path, [0])
+        self.assertIs(traversal.current, traversal.data['sections'][0])
+
+    def test_merge_at_root(self):
+        traversal = DictTraversal({'title': 'root', 'extra': 1}, children_field='sections')
+        with traversal.new_root(merge=True) as sub:
+            sub.add_child(title='Child')
+            del sub['extra']
+        self.assertEqual(traversal.data, {'title': 'root', 'sections': [{'title': 'Child'}]})
+        self.assertEqual(next(next(iter(traversal)))['title'], 'Child')
+
+    def test_merge_skipped_when_block_raises(self):
+        traversal = demo().set_path_as_current([0])
+        with self.assertRaises(RuntimeError):
+            with traversal.new_root(merge=True) as sub:
+                sub['title'] = 'X'
+                raise RuntimeError
+        self.assertEqual(traversal['title'], 'Child 1')
+
+class TestVisualize(unittest.TestCase):
+
+    def test_only_current_item_is_marked_with_duplicate_labels(self):
+        traversal = DictTraversal({'title': 'r', 'c': [{'title': 'A'}, {'title': 'A'}, {'title': 'r'}]}, children_field='c')
+        traversal.set_path_as_current([1])
+        self.assertEqual(traversal.visualize('title', from_root=True).split('\n'), ['r', '├── A', '├── A*', '└── r'])
+        root(traversal)
+        self.assertEqual(traversal.visualize('title').split('\n'), ['r*', '├── A', '├── A', '└── r'])
+
+    def test_max_depth(self):
+        traversal = demo().set_path_as_current([1])
+        self.assertEqual(traversal.visualize('title', from_root=True, max_depth=1).split('\n'),
+                         ['root', '├── Child 1', '├── Child 2* (+2)', '└── Child 3'])
+        self.assertEqual(traversal.visualize('title', max_depth=1).split('\n'),
+                         ['Child 2*', '├── Grandchild 1', '└── Grandchild 2 (+1)'])
+        self.assertEqual(traversal.visualize('title', from_root=True, max_depth=0), 'root (+3)')
+        self.assertEqual(traversal.visualize('title', from_root=True), traversal.visualize('title', from_root=True, max_depth=10))
+
+
+class TestSiblingOnlyNavigation(unittest.TestCase):
+    # sibling_only navigates as if every subtree were collapsed:
+    # next skips the current item's children, prev does not enter the previous sibling's children.
+    CASES = [
+        # start, next, prev
+        ([], [0], [2]),
+        ([0], [1], []),
+        ([1], [2], [0]),
+        ([1, 0], [1, 1], [1]),
+        ([1, 1], [2], [1, 0]),          # past the last sibling: next sibling of the parent
+        ([1, 1, 0], [2], [1, 1]),       # from the deepest item: nearest ancestor's next sibling
+        ([2], [], [1]),                 # past the last top-level item: the root
+    ]
+
+    def test_next_and_prev_with_sibling_only(self):
+        for start, expected_next, expected_prev in self.CASES:
+            traversal = demo().set_path_as_current(start)
+            self.assertEqual(traversal.move_to_next_item(sibling_only=True).path, expected_next, f"next from {start}")
+            traversal = demo().set_path_as_current(start)
+            self.assertEqual(traversal.move_to_prev_item(sibling_only=True).path, expected_prev, f"prev from {start}")
+            _, path = demo().set_path_as_current(start).get_next_item_and_path(sibling_only=True)
+            self.assertEqual(path, expected_next)
+            _, path = demo().set_path_as_current(start).get_previous_item_and_path(sibling_only=True)
+            self.assertEqual(path, expected_prev)
+
+    def test_last_item_with_sibling_only_is_last_direct_child(self):
+        traversal = demo().set_path_as_current([1])
+        self.assertEqual(traversal.get_last_item_and_path(sibling_only=True), ({'title': 'Grandchild 2', 'sections': [{'title': 'Grandgrandchild'}]}, [1, 1]))
+        self.assertEqual(traversal.get_last_path(), [1, 1, 0])
+
+
 if __name__ == '__main__':
     unittest.main()

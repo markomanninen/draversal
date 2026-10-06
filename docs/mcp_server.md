@@ -92,7 +92,10 @@ further below. That set has 35 tools and is about 3,200 tokens.
 - `list_trees`: List stored trees (metadata only).
 - `delete_tree`: Remove a stored tree by `tree_id`.
 - `validate_tree`: Validate the whole tree and return `{valid: bool, error?: str}`.
-- `visualize_tree`: Render a text tree, optionally from the root or marking a path.
+- `visualize_tree`: Render a text tree from `current_path` (or the root), marking it
+  with `*`. Use `max_depth` to limit the levels shown; an item with hidden children
+  gets a `(+N)` suffix. Output is cut at `max_lines` (default 200, `0` for all), with a
+  final line telling how many lines were left out.
 - `next_item`: Advance the cursor and return `{item, path, child_count}`. The item
   has its own fields only. Options:
   - `where`: skip items whose own fields do not match a `DictSearchQuery` style
@@ -102,6 +105,10 @@ further below. That set has 35 tools and is about 3,200 tokens.
     for example `{"status": "done"}`, so "complete and go to next" is a single call.
   - `depth`: `0` returns the item's own fields, `1` adds its direct children and `-1` returns the whole subtree.
   - `peek`: return the item without moving the cursor.
+  - `skip_children`: move past the current item's subtree, to the next sibling or,
+    after the last sibling, to the next sibling of the nearest ancestor. It does not stop
+    at the end of a parent. With `prev_item` it moves to the previous sibling without
+    entering its subtree, or to the parent.
 - `prev_item`: Move the cursor back. It takes the same options and returns the same response as `next_item`.
 - `set_cursor`: Set the cursor path.
 - `get_item`: `{item, path, child_count}` at a path, or at the cursor when `path`

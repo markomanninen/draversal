@@ -37,12 +37,19 @@ def visualize_tree(
     tree_id: str,
     from_root: bool = False,
     current_path: Optional[List[int]] = None,
+    max_depth: Optional[int] = None,
+    max_lines: Optional[int] = 200,
 ) -> str:
-    """Render a text tree representation of the data."""
+    """Render a text tree from current_path (or the root), marking it with *.
+
+    max_depth limits levels; "(+N)" marks N hidden children. Output is cut at max_lines (0 = all).
+    """
     return tools.visualize_tree(
         from_root=from_root,
         current_path=current_path,
         tree_id=tree_id,
+        max_depth=max_depth,
+        max_lines=max_lines,
     )
 
 
@@ -278,7 +285,7 @@ def set_cursor(tree_id: str, path: List[int]) -> Dict[str, Any]:
 @mcp.tool()
 def next_item(
     tree_id: str,
-    sibling_only: bool = False,
+    skip_children: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
@@ -289,11 +296,13 @@ def next_item(
     where: skip items not matching this query on their own fields, e.g. {"status$ne": "done"}.
     update_current: fields to set on the current item before moving, e.g. {"status": "done"}.
     depth: 0 item fields, 1 with direct children, -1 whole subtree. peek: do not move.
+    skip_children: jump past the current subtree to the next sibling, or to the next
+    sibling of the nearest ancestor (does not stop at the end of a parent).
     If nothing matches, item is null and the cursor stays.
     """
     return tools.next_item(
         tree_id,
-        sibling_only=sibling_only,
+        skip_children=skip_children,
         where=where,
         update_current=update_current,
         depth=depth,
@@ -304,16 +313,19 @@ def next_item(
 @mcp.tool()
 def prev_item(
     tree_id: str,
-    sibling_only: bool = False,
+    skip_children: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
 ) -> Dict[str, Any]:
-    """Move the cursor back; same options and response as next_item."""
+    """Move the cursor back; same options and response as next_item.
+
+    skip_children: previous sibling without entering its subtree, or the parent.
+    """
     return tools.prev_item(
         tree_id,
-        sibling_only=sibling_only,
+        skip_children=skip_children,
         where=where,
         update_current=update_current,
         depth=depth,
