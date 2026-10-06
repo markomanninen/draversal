@@ -96,10 +96,10 @@ def _prune_dir_store(path: Path) -> Dict[str, Any]:
         if not isinstance(entry, dict) or "tree_id" not in entry:
             entry_path.unlink()
             report["removed_files"] += 1
-    # Cursor side files without a tree file
-    for cursor_path in sorted(path.glob("*.json.cursor")):
-        if not cursor_path.with_suffix("").exists():
-            cursor_path.unlink()
+    # Cursor and lock side files without a tree file
+    for side_path in sorted([*path.glob("*.json.cursor"), *path.glob("*.json.lock")]):
+        if not side_path.with_suffix("").exists():
+            side_path.unlink()
             report["removed_files"] += 1
     return report
 

@@ -247,7 +247,10 @@ Claude Code agent teams).
 
 **Planned in this order:**
 1. Named cursors per agent, store locking, and claiming the item a cursor moves to.
+   **Done**, together with optimistic `hash`/`if_hash` checks against stale writes
+   between a read and a later write.
 2. Per-tree field policy, for example "only `passes` may change", so the harness rule is enforced.
+   **Done** (`editable_fields`, `readonly_fields`, `lock_structure`).
 3. An optional `ready` filter based on `depends_on` ids.
 4. An agent-instruction snippet for AGENTS.md and CLAUDE.md.
 5. A repository-local store option.

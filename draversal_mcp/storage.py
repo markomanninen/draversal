@@ -3,13 +3,25 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
 
 
 STORE_ENV_VAR = "DRAVERSAL_MCP_STORE_PATH"
+DEFAULT_CURSOR = "default"
 DEFAULT_STORE_SUBPATH = Path(".draversal") / "trees.json"
 DEFAULT_STORE_DIR_SUBPATH = Path(".draversal") / "trees"
 
@@ -44,24 +56,88 @@ def _tree_file_path(store_dir: Path, tree_id: str) -> Path:
 
 
 def _cursor_file_path(store_dir: Path, tree_id: str) -> Path:
-    # Cursor is kept in a small side file, so moving it does not rewrite the whole tree.
+    # Cursors are kept in a small side file, so moving one does not rewrite the whole tree.
     # The suffix is not .json, so listing the store does not pick it up as a tree.
     return store_dir / (_encode_tree_id(tree_id) + ".cursor")
 
 
-def _read_cursor(store_dir: Path, tree_id: str, entry: Dict[str, Any]) -> List[int]:
+def _entry_cursors(entry: Dict[str, Any]) -> Dict[str, List[int]]:
+    # Cursors stored inside a tree entry (file store, or legacy directory entries)
+    cursors = dict(entry.get("cursors") or {})
+    cursors[DEFAULT_CURSOR] = entry.get("cursor_path", cursors.get(DEFAULT_CURSOR, []))
+    return cursors
+
+
+def _read_cursors(store_dir: Path, tree_id: str, entry: Dict[str, Any]) -> Dict[str, List[int]]:
     cursor_path = _cursor_file_path(store_dir, tree_id)
-    if cursor_path.exists():
-        return json.loads(cursor_path.read_text())
-    # Legacy entries keep the cursor inside the tree file
-    return entry.get("cursor_path", [])
+    if not cursor_path.exists():
+        return _entry_cursors(entry)
+    raw = json.loads(cursor_path.read_text())
+    # Older side files hold only the default cursor as a list
+    cursors = dict(raw) if isinstance(raw, dict) else {DEFAULT_CURSOR: raw}
+    cursors.setdefault(DEFAULT_CURSOR, [])
+    return cursors
 
 
-def _write_cursor(store_dir: Path, tree_id: str, cursor: List[int]) -> None:
+def _write_cursors(store_dir: Path, tree_id: str, cursors: Dict[str, List[int]]) -> None:
     cursor_path = _cursor_file_path(store_dir, tree_id)
     tmp_path = cursor_path.with_suffix(cursor_path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(cursor))
+    tmp_path.write_text(json.dumps(cursors))
     tmp_path.replace(cursor_path)
+
+
+_LOCKS_HELD = threading.local()
+
+
+def _lock_file_path(path: Path, tree_id: str) -> Path:
+    if _is_dir_store(path):
+        return path / (_encode_tree_id(tree_id) + ".lock")
+    # The single-file store is rewritten as a whole, so it has one lock
+    return path.with_name(path.name + ".lock")
+
+
+@contextmanager
+def tree_lock(tree_id: str, store_path: Optional[Path] = None) -> Iterator[None]:
+    """
+    Exclusive lock for a read-modify-write of one tree, across processes and threads.
+
+    Re-entrant within a thread, so tool functions can nest locked calls.
+    """
+    path = store_path or _default_store_path()
+    lock_path = _lock_file_path(path, tree_id)
+    held = getattr(_LOCKS_HELD, "counts", None)
+    if held is None:
+        held = _LOCKS_HELD.counts = {}
+    key = str(lock_path)
+    if held.get(key):
+        held[key] += 1
+        try:
+            yield
+        finally:
+            held[key] -= 1
+        return
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+b") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:  # pragma: no cover - Windows
+            handle.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue
+        held[key] = 1
+        try:
+            yield
+        finally:
+            held.pop(key, None)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:  # pragma: no cover - Windows
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _dumps(data: Dict[str, Any]) -> str:
@@ -183,35 +259,52 @@ def save_tree(
     store_path: Optional[Path] = None,
     existing: Optional[Dict[str, Any]] = None,
     cursor_path: Optional[List[int]] = None,
+    cursors: Optional[Dict[str, List[int]]] = None,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Save a tree entry.
 
     `existing` is an already loaded entry of the same tree, which saves parsing
-    the tree file again. `cursor_path` overrides the stored cursor.
+    the tree file again. `cursors` replaces all stored cursors, and `cursor_path`
+    replaces the default one. `schema` and `policy` are kept from the existing
+    entry when not given.
     """
     path = store_path or _default_store_path()
-    now = _utc_now()
-    new_cursor = cursor_path
+    if tree_id is None:
+        tree_id = str(uuid.uuid4())
+        existing = None
+        is_new = True
+    else:
+        is_new = False
 
-    if _is_dir_store(path):
-        if tree_id is None:
-            tree_id = str(uuid.uuid4())
-            created_at = now
-            cursor_path = []
-        else:
-            if existing is None:
+    with tree_lock(tree_id, path):
+        now = _utc_now()
+        dir_store = _is_dir_store(path)
+        store = None if dir_store else _load_store(path)
+        if not is_new:
+            if not dir_store:
+                existing = store["trees"].get(tree_id)
+            elif existing is None:
                 try:
                     existing = _load_tree_entry(path, tree_id)
                 except KeyError:
                     existing = None
-            created_at = existing.get("created_at", now) if existing else now
-            cursor_path = _read_cursor(path, tree_id, existing) if existing else []
-            if schema is None and existing:
+        if existing:
+            stored_cursors = _read_cursors(path, tree_id, existing) if dir_store else _entry_cursors(existing)
+            if schema is None:
                 schema = existing.get("schema")
+            if policy is None:
+                policy = existing.get("policy")
+        else:
+            stored_cursors = {DEFAULT_CURSOR: []}
+        created_at = existing.get("created_at", now) if existing else now
+        if cursors is not None:
+            stored_cursors = {**cursors}
+            stored_cursors.setdefault(DEFAULT_CURSOR, [])
+        if cursor_path is not None:
+            stored_cursors[DEFAULT_CURSOR] = cursor_path
 
-        if new_cursor is not None:
-            cursor_path = new_cursor
         count = _count_nodes(data, children_field)
         top_labels = _top_labels(data, children_field, label_field)
         entry = {
@@ -221,62 +314,31 @@ def save_tree(
             "label_field": label_field,
             "count": count,
             "top_labels": top_labels,
-            "cursor_path": cursor_path,
+            "cursor_path": stored_cursors[DEFAULT_CURSOR],
             "schema": schema,
             "created_at": created_at,
             "updated_at": now,
         }
-        _write_tree_file(_tree_file_path(path, tree_id), entry)
-        _write_cursor(path, tree_id, cursor_path)
+        if policy:
+            entry["policy"] = policy
+        if dir_store:
+            _write_tree_file(_tree_file_path(path, tree_id), entry)
+            _write_cursors(path, tree_id, stored_cursors)
+        else:
+            entry["cursors"] = stored_cursors
+            store["trees"][tree_id] = entry
+            _write_store(path, store)
         return {
             "tree_id": tree_id,
             "created_at": created_at,
             "updated_at": now,
             "count": count,
             "top_labels": top_labels,
-            "cursor_path": cursor_path,
+            "cursor_path": stored_cursors[DEFAULT_CURSOR],
+            "cursors": stored_cursors,
             "schema": schema,
+            "policy": policy,
         }
-
-    store = _load_store(path)
-    if tree_id is None:
-        tree_id = str(uuid.uuid4())
-        created_at = now
-        cursor_path = []
-    else:
-        existing = store["trees"].get(tree_id)
-        created_at = existing.get("created_at", now) if existing else now
-        cursor_path = existing.get("cursor_path", []) if existing else []
-        if schema is None and existing:
-            schema = existing.get("schema")
-    if new_cursor is not None:
-        cursor_path = new_cursor
-
-    count = _count_nodes(data, children_field)
-    top_labels = _top_labels(data, children_field, label_field)
-
-    store["trees"][tree_id] = {
-        "tree_id": tree_id,
-        "data": data,
-        "children_field": children_field,
-        "label_field": label_field,
-        "count": count,
-        "top_labels": top_labels,
-        "cursor_path": cursor_path,
-        "schema": schema,
-        "created_at": created_at,
-        "updated_at": now,
-    }
-    _write_store(path, store)
-    return {
-        "tree_id": tree_id,
-        "created_at": created_at,
-        "updated_at": now,
-        "count": count,
-        "top_labels": top_labels,
-        "cursor_path": cursor_path,
-        "schema": schema,
-    }
 
 
 def get_tree(
@@ -287,14 +349,16 @@ def get_tree(
     path = store_path or _default_store_path()
     if _is_dir_store(path):
         entry = _load_tree_entry(path, tree_id)
-        entry["cursor_path"] = _read_cursor(path, tree_id, entry)
-        entry = _with_meta(entry)
+        cursors = _read_cursors(path, tree_id, entry)
     else:
         store = _load_store(path)
         entry = store["trees"].get(tree_id)
         if not entry:
             raise KeyError(f"Tree not found: {tree_id}")
-        entry = _with_meta(entry)
+        cursors = _entry_cursors(entry)
+    entry["cursors"] = cursors
+    entry["cursor_path"] = cursors[DEFAULT_CURSOR]
+    entry = _with_meta(entry)
     if include_data:
         return entry
     return {k: v for k, v in entry.items() if k != "data"}
@@ -306,10 +370,11 @@ def list_trees(
 ) -> List[Dict[str, Any]]:
     path = store_path or _default_store_path()
     if _is_dir_store(path):
-        entries = [
-            {k: v for k, v in _with_meta(entry).items() if k not in ("data", "schema")}
-            for entry in _list_tree_entries(path)
-        ]
+        entries = []
+        for entry in _list_tree_entries(path):
+            cursors = _read_cursors(path, entry["tree_id"], entry)
+            entry = {**entry, "cursors": cursors, "cursor_path": cursors[DEFAULT_CURSOR]}
+            entries.append({k: v for k, v in _with_meta(entry).items() if k not in ("data", "schema")})
     else:
         store = _load_store(path)
         entries = [
@@ -324,51 +389,67 @@ def list_trees(
 
 def delete_tree(tree_id: str, store_path: Optional[Path] = None) -> Dict[str, Any]:
     path = store_path or _default_store_path()
-    if _is_dir_store(path):
-        tree_path = _tree_file_path(path, tree_id)
-        if tree_path.exists():
-            tree_path.unlink()
-            _cursor_file_path(path, tree_id).unlink(missing_ok=True)
+    with tree_lock(tree_id, path):
+        if _is_dir_store(path):
+            tree_path = _tree_file_path(path, tree_id)
+            if tree_path.exists():
+                tree_path.unlink()
+                _cursor_file_path(path, tree_id).unlink(missing_ok=True)
+                return {"deleted": True, "tree_id": tree_id}
+            return {"deleted": False, "tree_id": tree_id}
+        store = _load_store(path)
+        if tree_id in store["trees"]:
+            del store["trees"][tree_id]
+            _write_store(path, store)
             return {"deleted": True, "tree_id": tree_id}
         return {"deleted": False, "tree_id": tree_id}
-    store = _load_store(path)
-    if tree_id in store["trees"]:
-        del store["trees"][tree_id]
-        _write_store(path, store)
-        return {"deleted": True, "tree_id": tree_id}
-    return {"deleted": False, "tree_id": tree_id}
 
 
-def get_cursor(tree_id: str, store_path: Optional[Path] = None) -> List[int]:
+def get_cursor(
+    tree_id: str,
+    store_path: Optional[Path] = None,
+    name: str = DEFAULT_CURSOR,
+) -> List[int]:
     path = store_path or _default_store_path()
     if _is_dir_store(path):
-        cursor_path = _cursor_file_path(path, tree_id)
-        if cursor_path.exists():
-            return json.loads(cursor_path.read_text())
-        return _load_tree_entry(path, tree_id).get("cursor_path", [])
-    store = _load_store(path)
-    entry = store["trees"].get(tree_id)
-    if not entry:
-        raise KeyError(f"Tree not found: {tree_id}")
-    return entry.get("cursor_path", [])
+        if _cursor_file_path(path, tree_id).exists():
+            cursors = _read_cursors(path, tree_id, {})
+        else:
+            cursors = _entry_cursors(_load_tree_entry(path, tree_id))
+    else:
+        entry = _load_store(path)["trees"].get(tree_id)
+        if not entry:
+            raise KeyError(f"Tree not found: {tree_id}")
+        cursors = _entry_cursors(entry)
+    # A cursor that has not been used yet starts at the root
+    return cursors.get(name, [])
 
 
 def set_cursor(
     tree_id: str,
     cursor_path: List[int],
     store_path: Optional[Path] = None,
+    name: str = DEFAULT_CURSOR,
 ) -> Dict[str, Any]:
     path = store_path or _default_store_path()
-    if _is_dir_store(path):
-        if not _tree_file_path(path, tree_id).exists():
+    with tree_lock(tree_id, path):
+        if _is_dir_store(path):
+            if not _tree_file_path(path, tree_id).exists():
+                raise KeyError(f"Tree not found: {tree_id}")
+            if _cursor_file_path(path, tree_id).exists():
+                cursors = _read_cursors(path, tree_id, {})
+            else:
+                cursors = _entry_cursors(_load_tree_entry(path, tree_id))
+            cursors[name] = cursor_path
+            _write_cursors(path, tree_id, cursors)
+            return {"tree_id": tree_id, "cursor": name, "cursor_path": cursor_path}
+        store = _load_store(path)
+        entry = store["trees"].get(tree_id)
+        if not entry:
             raise KeyError(f"Tree not found: {tree_id}")
-        _write_cursor(path, tree_id, cursor_path)
-        return {"tree_id": tree_id, "cursor_path": cursor_path}
-    store = _load_store(path)
-    entry = store["trees"].get(tree_id)
-    if not entry:
-        raise KeyError(f"Tree not found: {tree_id}")
-    entry["cursor_path"] = cursor_path
-    store["trees"][tree_id] = entry
-    _write_store(path, store)
-    return {"tree_id": tree_id, "cursor_path": cursor_path}
+        cursors = _entry_cursors(entry)
+        cursors[name] = cursor_path
+        entry["cursors"] = cursors
+        entry["cursor_path"] = cursors[DEFAULT_CURSOR]
+        _write_store(path, store)
+        return {"tree_id": tree_id, "cursor": name, "cursor_path": cursor_path}

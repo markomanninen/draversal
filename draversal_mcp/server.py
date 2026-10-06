@@ -271,15 +271,15 @@ def delete_child(tree_id: str, path: List[int]) -> Dict[str, Any]:
 
 
 @_legacy_tool
-def get_cursor(tree_id: str) -> List[int]:
+def get_cursor(tree_id: str, cursor: Optional[str] = None) -> List[int]:
     """Return the stored cursor path for the tree."""
-    return tools.get_cursor(tree_id)
+    return tools.get_cursor(tree_id, cursor=cursor)
 
 
 @mcp.tool()
-def set_cursor(tree_id: str, path: List[int]) -> Dict[str, Any]:
-    """Set the stored cursor path for the tree."""
-    return tools.set_cursor(tree_id, path)
+def set_cursor(tree_id: str, path: List[int], cursor: Optional[str] = None) -> Dict[str, Any]:
+    """Set the stored cursor path; cursor names an independent cursor."""
+    return tools.set_cursor(tree_id, path, cursor=cursor)
 
 
 @mcp.tool()
@@ -290,11 +290,17 @@ def next_item(
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
+    cursor: Optional[str] = None,
+    update_found: Optional[Dict[str, Any]] = None,
+    if_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Move the cursor forward and return {item, path, child_count}.
+    """Move the cursor forward and return {item, path, child_count, hash}.
 
     where: skip items not matching this query on their own fields, e.g. {"status$ne": "done"}.
     update_current: fields to set on the current item before moving, e.g. {"status": "done"}.
+    update_found: fields to set on the item moved to, atomically, e.g. {"status": "doing", "owner": "me"} to claim it.
+    cursor: name of an independent cursor (e.g. per agent); default is shared.
+    if_hash: hash of the current item as last read; update_current then fails on a conflict.
     depth: 0 item fields, 1 with direct children, -1 whole subtree. peek: do not move.
     skip_children: jump past the current subtree to the next sibling, or to the next
     sibling of the nearest ancestor (does not stop at the end of a parent).
@@ -307,6 +313,9 @@ def next_item(
         update_current=update_current,
         depth=depth,
         peek=peek,
+        cursor=cursor,
+        update_found=update_found,
+        if_hash=if_hash,
     )
 
 
@@ -318,6 +327,9 @@ def prev_item(
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
+    cursor: Optional[str] = None,
+    update_found: Optional[Dict[str, Any]] = None,
+    if_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Move the cursor back; same options and response as next_item.
 
@@ -330,13 +342,21 @@ def prev_item(
         update_current=update_current,
         depth=depth,
         peek=peek,
+        cursor=cursor,
+        update_found=update_found,
+        if_hash=if_hash,
     )
 
 
 @mcp.tool()
-def get_item(tree_id: str, path: Optional[List[int]] = None, depth: int = 0) -> Dict[str, Any]:
-    """Return {item, path, child_count} at path, or at the cursor if path is omitted. depth as in next_item."""
-    return tools.get_item(tree_id, path=path, depth=depth)
+def get_item(
+    tree_id: str,
+    path: Optional[List[int]] = None,
+    depth: int = 0,
+    cursor: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return {item, path, child_count, hash} at path, or at the (named) cursor if path is omitted. depth as in next_item."""
+    return tools.get_item(tree_id, path=path, depth=depth, cursor=cursor)
 
 
 @mcp.tool()
@@ -351,7 +371,7 @@ def search(
     limit: int = 50,
     order_by: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Find items; returns {matches: [{item, path}], total}.
+    """Find items; returns {matches: [{item, path, hash}], total}.
 
     text: label substring (regex if regex=true). titles: label chain from the root, e.g. ["Project", "Task"].
     where: query on item fields, e.g. {"status": "todo", "priority$ge": 3}; combinable with text.
@@ -379,8 +399,14 @@ def save_tree(
     tree_id: Optional[str] = None,
     validate: bool = True,
     schema: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
+    override_policy: bool = False,
 ) -> Dict[str, Any]:
-    """Persist a tree for later access by tree_id."""
+    """Persist a tree for later access by tree_id.
+
+    policy limits later edits: {"editable_fields": [...], "readonly_fields": [...], "lock_structure": bool}.
+    Replacing a tree that has a policy needs override_policy=true.
+    """
     saved = tools.save_tree(
         data,
         children_field,
@@ -388,6 +414,8 @@ def save_tree(
         tree_id=tree_id,
         validate=validate,
         schema=schema,
+        policy=policy,
+        override_policy=override_policy,
     )
     # The caller already has the schema, no need to echo it back
     return {k: v for k, v in saved.items() if k != "schema"}
@@ -418,7 +446,8 @@ def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     ops items: {"op": "add_child", "path": parent, "item": {...}},
     {"op": "insert_child", "path": parent, "index": i, "item": {...}},
     {"op": "modify", "path": p, "changes": {...}}, {"op": "replace_child", "path": p, "item": {...}},
-    {"op": "delete_child", "path": p}. The cursor follows inserts and deletes.
+    {"op": "delete_child", "path": p}. The cursors follow inserts and deletes.
+    Add "if_hash" (from a read) to any op to reject the whole batch if that item changed meanwhile.
     """
     return tools.apply_tree_ops(tree_id, ops)
 

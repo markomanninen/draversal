@@ -144,6 +144,44 @@ The stored cursor follows edits:
   continues from the item that took its place.
 - Replacing an ancestor of the cursor moves the cursor to the replaced item.
 
+### Several agents on one tree
+
+- **Named cursors.** `next_item`, `prev_item`, `get_item` and `set_cursor` take
+  `cursor`, for example `cursor="agent-a"`. Each name keeps its own position; the
+  default cursor is named `default`. `get_tree` lists all cursors. Edits move every
+  cursor, not just the default one.
+- **Locking.** Every tool call that reads, changes and writes a tree holds an
+  exclusive lock on that tree (`<tree file>.lock`, or `trees.json.lock` for the
+  single-file store), so concurrent calls from different processes or threads cannot
+  overwrite each other's changes.
+- **Claiming.** `update_found` sets fields on the item the cursor moves to in the same
+  locked step. For example,
+  `next_item(cursor="agent-a", where={"status": "todo"}, update_found={"status": "doing", "owner": "agent-a"})`
+  hands each open item to exactly one agent.
+- **Stale writes.** Responses carry the item's `hash` (12 hex characters of its own
+  fields). Pass it back as `if_hash` on an `apply_tree_ops` op, or to `next_item`
+  together with `update_current`, to make the write fail with a conflict:
+  - if another agent changed the item after it was read, or
+  - if the path now points to another item because items before it were added or deleted.
+
+  A conflict rejects the whole batch. Read the item again and retry.
+
+### Edit policy
+
+`save_tree(..., policy={...})` limits what later edits may change:
+
+- `editable_fields`: only these fields may change, for example `["passes"]`.
+- `readonly_fields`: these fields may not change.
+- `lock_structure`: no `add_child`, `insert_child`, `replace_child` or `delete_child`.
+
+Writing a field's current value again is not a change. `replace_child` is checked
+field by field against the old item. Replacing a whole tree that has a policy needs
+`override_policy=true`. Anthropic's
+[long-running harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+rule "agents may only flip `passes`" becomes
+`policy={"editable_fields": ["passes"], "lock_structure": true}`. The policy is a
+guardrail against accidental edits by agents, not access control.
+
 ### Additional tools (`DRAVERSAL_MCP_TOOLS=all`)
 
 - `traversal_search`, `traversal_find_paths`, `dict_search`: older search variants, covered by `search`.

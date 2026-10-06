@@ -276,6 +276,7 @@ class TestMcpCursorEconomy(unittest.TestCase):
 
     def test_next_item_returns_item_without_children(self):
         result = tools.next_item(self.tree_id)
+        result.pop("hash")
         self.assertEqual(result, {"item": {"title": "P1", "status": "done"}, "path": [0], "child_count": 2})
         self.assertEqual(tools.get_cursor(self.tree_id), [0])
         tools.set_cursor(self.tree_id, [])
@@ -420,7 +421,9 @@ class TestMcpCoreTools(unittest.TestCase):
 
     def test_get_item_at_cursor_and_depth(self):
         tools.set_cursor(self.tree_id, [0])
-        self.assertEqual(tools.get_item(self.tree_id), {"item": {"title": "A", "status": "todo"}, "path": [0], "child_count": 2})
+        result = tools.get_item(self.tree_id)
+        self.assertEqual(len(result.pop("hash")), 12)
+        self.assertEqual(result, {"item": {"title": "A", "status": "todo"}, "path": [0], "child_count": 2})
         self.assertEqual(len(tools.get_item(self.tree_id, [], depth=1)["item"]["tasks"]), 3)
 
     def test_peek_does_not_move(self):
@@ -497,3 +500,214 @@ class TestMcpServerToolset(unittest.TestCase):
         schema = json.dumps(listed["next_item"].inputSchema)
         self.assertNotIn('"title"', schema)
         self.assertNotIn("anyOf", schema)
+
+
+def _claim_until_empty(store_path, tree_id, agent):
+    # Runs in a separate process: claim open items until none are left
+    os.environ["DRAVERSAL_MCP_STORE_PATH"] = store_path
+    claimed = []
+    while True:
+        result = tools.next_item(
+            tree_id,
+            cursor=agent,
+            where={"status": "todo"},
+            update_found={"status": "doing", "owner": agent},
+        )
+        if result["item"] is None:
+            return claimed
+        claimed.append(result["item"]["title"])
+
+
+class TestMcpMultiAgent(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        data = {"title": "All", "status": "done", "tasks": [
+            {"title": f"T{i}", "status": "todo"} for i in range(6)
+        ]}
+        self.tree_id = tools.save_tree(data, "tasks", "title")["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def test_named_cursors_are_independent(self):
+        self.assertEqual(tools.next_item(self.tree_id, cursor="a")["path"], [0])
+        self.assertEqual(tools.next_item(self.tree_id, cursor="a")["path"], [1])
+        self.assertEqual(tools.next_item(self.tree_id, cursor="b")["path"], [0])
+        self.assertEqual(tools.get_cursor(self.tree_id), [])
+        self.assertEqual(tools.get_item(self.tree_id, cursor="a")["path"], [1])
+        tools.set_cursor(self.tree_id, [4], cursor="b")
+        self.assertEqual(tools.get_tree(self.tree_id)["cursors"], {"default": [], "a": [1], "b": [4]})
+        with self.assertRaises(ValueError):
+            tools.next_item(self.tree_id, cursor="")
+
+    def test_edits_move_every_cursor(self):
+        tools.set_cursor(self.tree_id, [2], cursor="a")
+        tools.set_cursor(self.tree_id, [4], cursor="b")
+        result = tools.apply_tree_ops(self.tree_id, [
+            {"op": "delete_child", "path": [0]},
+            {"op": "insert_child", "path": [], "index": 2, "item": {"title": "N", "status": "todo"}},
+        ])
+        self.assertEqual(result["cursors"], {"default": [], "a": [1], "b": [4]})
+        self.assertEqual(tools.get_item(self.tree_id, cursor="b")["item"]["title"], "T4")
+
+    def test_update_found_claims_the_item(self):
+        first = tools.next_item(self.tree_id, cursor="a", where={"status": "todo"}, update_found={"status": "doing", "owner": "a"})
+        self.assertEqual(first["item"], {"title": "T0", "status": "doing", "owner": "a"})
+        second = tools.next_item(self.tree_id, cursor="b", where={"status": "todo"}, update_found={"status": "doing", "owner": "b"})
+        self.assertEqual(second["item"]["title"], "T1")
+        self.assertEqual(tools.get_item(self.tree_id, [0])["item"]["owner"], "a")
+        with self.assertRaises(ValueError):
+            tools.next_item(self.tree_id, peek=True, update_found={"status": "doing"})
+
+    def test_if_hash_rejects_stale_writes(self):
+        read = tools.get_item(self.tree_id, [2])
+        # Another agent changes the item after it was read
+        tools.modify_item(self.tree_id, [2], key="status", value="doing")
+        with self.assertRaisesRegex(ValueError, "Conflict"):
+            tools.apply_tree_ops(self.tree_id, [{"op": "modify", "path": [2], "changes": {"status": "done"}, "if_hash": read["hash"]}])
+        self.assertEqual(tools.get_item(self.tree_id, [2])["item"]["status"], "doing")
+        fresh = tools.get_item(self.tree_id, [2])
+        tools.apply_tree_ops(self.tree_id, [{"op": "modify", "path": [2], "changes": {"status": "done"}, "if_hash": fresh["hash"]}])
+        self.assertEqual(tools.get_item(self.tree_id, [2])["item"]["status"], "done")
+
+    def test_if_hash_detects_shifted_paths(self):
+        read = tools.get_item(self.tree_id, [3])
+        tools.delete_child(self.tree_id, [0])
+        # [3] is now a different item
+        with self.assertRaisesRegex(ValueError, "Conflict"):
+            tools.apply_tree_ops(self.tree_id, [{"op": "delete_child", "path": [3], "if_hash": read["hash"]}])
+        self.assertEqual(tools.get_item(self.tree_id, [])["child_count"], 5)
+        # The same item is now at [2], so its hash matches there
+        self.assertEqual(tools.get_item(self.tree_id, [2])["hash"], read["hash"])
+        # A failed batch changes nothing
+        with self.assertRaisesRegex(ValueError, "Conflict"):
+            tools.apply_tree_ops(self.tree_id, [
+                {"op": "modify", "path": [0], "changes": {"status": "done"}},
+                {"op": "delete_child", "path": [3], "if_hash": read["hash"]},
+            ])
+        self.assertEqual(tools.get_item(self.tree_id, [0])["item"]["status"], "todo")
+
+    def test_update_current_with_if_hash(self):
+        seen = tools.next_item(self.tree_id, cursor="a")
+        tools.modify_item(self.tree_id, seen["path"], key="note", value="changed by b")
+        with self.assertRaisesRegex(ValueError, "Conflict"):
+            tools.next_item(self.tree_id, cursor="a", update_current={"status": "done"}, if_hash=seen["hash"])
+        self.assertEqual(tools.get_cursor(self.tree_id, cursor="a"), seen["path"])
+        self.assertEqual(tools.search(self.tree_id, text="T1")["matches"][0]["hash"], tools.get_item(self.tree_id, [1])["hash"])
+
+    def test_concurrent_processes_claim_each_item_once(self):
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=3, mp_context=context) as pool:
+            futures = [pool.submit(_claim_until_empty, self.temp_dir.name, self.tree_id, f"agent-{i}") for i in range(3)]
+            claimed = [title for future in futures for title in future.result()]
+        self.assertEqual(sorted(claimed), [f"T{i}" for i in range(6)])
+        statuses = [match["item"]["status"] for match in tools.search(self.tree_id, where={"title$regex": "T"})["matches"]]
+        self.assertEqual(statuses, ["doing"] * 6)
+
+    def test_concurrent_threads_do_not_lose_updates(self):
+        import threading
+        errors = []
+
+        def add(i):
+            try:
+                tools.add_child(self.tree_id, [], {"title": f"N{i}", "status": "todo"})
+            except Exception as exc:  # pragma: no cover - reported below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=add, args=(i,)) for i in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(tools.get_item(self.tree_id, [])["child_count"], 16)
+
+    def test_old_cursor_file_format_and_file_store(self):
+        cursor_file = storage._cursor_file_path(Path(self.temp_dir.name), self.tree_id)
+        cursor_file.write_text("[3]")
+        self.assertEqual(tools.get_cursor(self.tree_id), [3])
+        self.assertEqual(tools.next_item(self.tree_id, cursor="a")["path"], [0])
+        self.assertEqual(json.loads(cursor_file.read_text()), {"default": [3], "a": [0]})
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = os.path.join(self.temp_dir.name, "trees.json")
+        tree_id = tools.save_tree({"title": "r", "c": [{"title": "x"}, {"title": "y"}]}, "c", "title")["tree_id"]
+        self.assertEqual(tools.next_item(tree_id, cursor="a")["path"], [0])
+        self.assertEqual(tools.next_item(tree_id)["path"], [0])
+        self.assertEqual(tools.next_item(tree_id, cursor="a")["path"], [1])
+        self.assertEqual(tools.get_tree(tree_id)["cursors"], {"default": [0], "a": [1]})
+
+
+class TestMcpEditPolicy(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        # Anthropic's long-running harness: agents may only flip "passes"
+        self.data = {"title": "Features", "features": [
+            {"title": "Login", "steps": ["open", "submit"], "passes": False},
+            {"title": "Logout", "steps": ["click"], "passes": False},
+        ]}
+        self.tree_id = tools.save_tree(
+            self.data, "features", "title",
+            policy={"editable_fields": ["passes"], "lock_structure": True},
+        )["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def test_only_editable_fields_change(self):
+        tools.modify_item(self.tree_id, [0], key="passes", value=True)
+        self.assertTrue(tools.get_item(self.tree_id, [0])["item"]["passes"])
+        with self.assertRaisesRegex(ValueError, "steps"):
+            tools.modify_item(self.tree_id, [1], changes={"steps": [], "passes": True})
+        self.assertFalse(tools.get_item(self.tree_id, [1])["item"]["passes"])
+        # Writing an unchanged value of a protected field is not a change
+        tools.modify_item(self.tree_id, [1], changes={"title": "Logout", "passes": True})
+        with self.assertRaises(ValueError):
+            tools.next_item(self.tree_id, update_current={"title": "Root"})
+
+    def test_structure_is_locked(self):
+        for op in (
+            {"op": "add_child", "path": [], "item": {"title": "New"}},
+            {"op": "insert_child", "path": [], "index": 0, "item": {"title": "New"}},
+            {"op": "delete_child", "path": [0]},
+            {"op": "replace_child", "path": [0], "item": {"title": "Login", "steps": [], "passes": True}},
+            {"op": "modify", "path": [0], "changes": {"features": []}},
+        ):
+            with self.assertRaises(ValueError, msg=op["op"]):
+                tools.apply_tree_ops(self.tree_id, [op])
+        self.assertEqual(tools.get_tree(self.tree_id)["data"]["features"][0]["steps"], ["open", "submit"])
+
+    def test_readonly_fields_and_replace_diff(self):
+        tree_id = tools.save_tree(self.data, "features", "title", policy={"readonly_fields": ["steps"]})["tree_id"]
+        tools.apply_tree_ops(tree_id, [
+            {"op": "replace_child", "path": [0], "item": {"title": "Sign in", "steps": ["open", "submit"], "passes": True}},
+            {"op": "add_child", "path": [], "item": {"title": "Profile", "steps": [], "passes": False}},
+        ])
+        with self.assertRaisesRegex(ValueError, "steps"):
+            tools.apply_tree_ops(tree_id, [{"op": "replace_child", "path": [1], "item": {"title": "Logout", "passes": False}}])
+
+    def test_replacing_a_tree_with_policy_needs_override(self):
+        with self.assertRaisesRegex(ValueError, "override_policy"):
+            tools.save_tree(self.data, "features", "title", tree_id=self.tree_id)
+        tools.save_tree(self.data, "features", "title", tree_id=self.tree_id, override_policy=True, policy={})
+        tools.add_child(self.tree_id, [], {"title": "New"})
+        self.assertEqual(tools.get_item(self.tree_id, [])["child_count"], 3)
+
+    def test_policy_is_validated_and_shown(self):
+        with self.assertRaises(ValueError):
+            tools.save_tree(self.data, "features", "title", policy={"editable": ["passes"]})
+        with self.assertRaises(ValueError):
+            tools.save_tree(self.data, "features", "title", policy={"editable_fields": "passes"})
+        self.assertEqual(tools.get_tree(self.tree_id, include_data=False)["policy"], {"editable_fields": ["passes"], "lock_structure": True})

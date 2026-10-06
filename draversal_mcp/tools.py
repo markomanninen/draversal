@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -164,7 +165,7 @@ def _save_traversal(
     entry: Dict[str, Any],
     tree_id: str,
     changed_items: Optional[List[Dict[str, Any]]] = None,
-    cursor_path: Optional[List[int]] = None,
+    cursors: Optional[Dict[str, List[int]]] = None,
 ) -> Dict[str, Any]:
     # Root fields live in the traversal itself, children lists are shared with entry["data"]
     data = traversal.data
@@ -180,11 +181,15 @@ def _save_traversal(
         tree_id=tree_id,
         schema=entry.get("schema"),
         existing=entry,
-        cursor_path=cursor_path,
+        cursors=cursors,
     )
     entry["cursor_path"] = result["cursor_path"]
+    entry["cursors"] = result["cursors"]
     # Keep write responses small: no schema or top labels
-    return {k: result[k] for k in ("tree_id", "updated_at", "count", "cursor_path")}
+    response = {k: result[k] for k in ("tree_id", "updated_at", "count", "cursor_path")}
+    if len(result["cursors"]) > 1:
+        response["cursors"] = result["cursors"]
+    return response
 
 
 def validate_tree(tree_id: str) -> Dict[str, Any]:
@@ -469,16 +474,24 @@ def delete_child(tree_id: str, path: List[int]) -> Dict[str, Any]:
     return apply_tree_ops(tree_id, [{"op": "delete_child", "path": path}])
 
 
-def get_cursor(tree_id: str) -> List[int]:
-    """Return the stored cursor path for the tree."""
-    return storage.get_cursor(tree_id)
+def _cursor_name(cursor: Optional[str]) -> str:
+    if cursor is None:
+        return storage.DEFAULT_CURSOR
+    if not isinstance(cursor, str) or not cursor.strip() or len(cursor) > 64:
+        raise ValueError("cursor must be a non-empty name of at most 64 characters.")
+    return cursor
 
 
-def set_cursor(tree_id: str, path: List[int]) -> Dict[str, Any]:
+def get_cursor(tree_id: str, cursor: Optional[str] = None) -> List[int]:
+    """Return the stored cursor path for the tree. Named cursors let several agents browse independently."""
+    return storage.get_cursor(tree_id, name=_cursor_name(cursor))
+
+
+def set_cursor(tree_id: str, path: List[int], cursor: Optional[str] = None) -> Dict[str, Any]:
     """Set the stored cursor path for the tree."""
     traversal, _ = _get_traversal(tree_id)
     traversal.get_item_by_path(path)
-    return storage.set_cursor(tree_id, path)
+    return storage.set_cursor(tree_id, path, name=_cursor_name(cursor))
 
 
 def _shape_item(item: Dict[str, Any], children_field: str, depth: int) -> Dict[str, Any]:
@@ -490,11 +503,31 @@ def _shape_item(item: Dict[str, Any], children_field: str, depth: int) -> Dict[s
     return fields
 
 
+def _item_hash(item: Dict[str, Any], children_field: str) -> str:
+    # Hash of the item's own fields: a write with if_hash fails if the item changed
+    # since it was read, or if its path now points to another item.
+    fields = {k: v for k, v in item.items() if k != children_field}
+    canonical = json.dumps(fields, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+def _check_hash(item: Dict[str, Any], children_field: str, path: List[int], expected: Optional[str]) -> None:
+    if expected is None:
+        return
+    actual = _item_hash(item, children_field)
+    if actual != expected:
+        raise ValueError(
+            f"Conflict: the item at {path} has changed since it was read "
+            f"(hash {expected}, now {actual}). Read it again and retry."
+        )
+
+
 def _item_response(item: Dict[str, Any], path: List[int], children_field: str, depth: int) -> Dict[str, Any]:
     return {
         "item": _shape_item(item, children_field, depth),
         "path": path,
         "child_count": len(item.get(children_field) or []),
+        "hash": _item_hash(item, children_field),
     }
 
 
@@ -506,29 +539,41 @@ def _move_cursor(
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
+    cursor: Optional[str] = None,
+    update_found: Optional[Dict[str, Any]] = None,
+    if_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
-    # The tree is loaded once; only the small cursor file is written,
-    # unless update_current modifies the item under the cursor first.
-    entry = _load_tree(tree_id)
-    children_field = entry["children_field"]
-    if update_current:
-        if peek:
-            raise ValueError("update_current can not be used with peek.")
-        _apply_ops(entry, tree_id, [{"op": "modify", "path": entry.get("cursor_path", []), "changes": update_current}])
-    traversal = DictTraversal(entry["data"], children_field=children_field)
-    traversal.set_path_as_current(entry.get("cursor_path", []))
-    move = traversal.move_to_next_item if forward else traversal.move_to_prev_item
-    query = DictSearchQuery(where) if where else None
-    # Visit every item at most once, root included, before giving up
-    node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
-    for _ in range(node_count if query else 1):
-        move(sibling_only=skip_children)
-        item = traversal.current
-        if query is None or query.execute({k: v for k, v in item.items() if k != children_field}):
-            if not peek:
-                storage.set_cursor(tree_id, traversal.path)
-            return _item_response(item, traversal.path, children_field, depth)
-    return {"item": None, "path": entry.get("cursor_path", []), "child_count": 0}
+    name = _cursor_name(cursor)
+    if peek and (update_current or update_found):
+        raise ValueError("update_current and update_found can not be used with peek.")
+    # The whole move is one locked step, so two agents can not claim the same item
+    with storage.tree_lock(tree_id):
+        # The tree is loaded once; only the small cursor file is written,
+        # unless the move also modifies items.
+        entry = _load_tree(tree_id)
+        children_field = entry["children_field"]
+        start = entry["cursors"].get(name, [])
+        if update_current:
+            _apply_ops(entry, tree_id, [{"op": "modify", "path": start, "changes": update_current, "if_hash": if_hash}])
+        traversal = DictTraversal(entry["data"], children_field=children_field)
+        traversal.set_path_as_current(start)
+        move = traversal.move_to_next_item if forward else traversal.move_to_prev_item
+        query = DictSearchQuery(where) if where else None
+        # Visit every item at most once, root included, before giving up
+        node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
+        for _ in range(node_count if query else 1):
+            move(sibling_only=skip_children)
+            item = traversal.current
+            if query is None or query.execute({k: v for k, v in item.items() if k != children_field}):
+                found = traversal.path
+                if update_found:
+                    _apply_ops(entry, tree_id, [{"op": "modify", "path": found, "changes": update_found}])
+                    traversal = DictTraversal(entry["data"], children_field=children_field)
+                    item = traversal.set_path_as_current(found).current
+                if not peek:
+                    storage.set_cursor(tree_id, found, name=name)
+                return _item_response(item, found, children_field, depth)
+        return {"item": None, "path": start, "child_count": 0}
 
 
 def next_item(
@@ -538,6 +583,9 @@ def next_item(
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
+    cursor: Optional[str] = None,
+    update_found: Optional[Dict[str, Any]] = None,
+    if_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Advance the stored cursor and return the next item and path.
 
@@ -546,13 +594,18 @@ def next_item(
     `item` is None and the cursor does not move.
     `update_current` modifies the item under the cursor before moving, for example
     `{"status": "done"}`, so completing a task and advancing is a single call.
+    `update_found` modifies the item the cursor moves to, in the same locked step,
+    for example `{"status": "doing", "assignee": "agent-a"}` to claim it.
     `depth` controls how much of the subtree is returned: 0 the item's own fields,
     1 also its direct children, -1 the whole subtree. `child_count` tells how many
     direct children the item has. `peek` returns the item without moving the cursor.
     `skip_children` moves past the current item's subtree: to the next sibling, or to
     the next sibling of the nearest ancestor (it does not stop at the end of a parent).
+    `cursor` names an independent cursor, so several agents can browse the same tree.
+    Responses include the item's `hash`; pass it as `if_hash` to make `update_current`
+    fail with a conflict if another agent changed the item in between.
     """
-    return _move_cursor(tree_id, True, skip_children, where, update_current, depth, peek)
+    return _move_cursor(tree_id, True, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash)
 
 
 def prev_item(
@@ -562,22 +615,30 @@ def prev_item(
     update_current: Optional[Dict[str, Any]] = None,
     depth: int = 0,
     peek: bool = False,
+    cursor: Optional[str] = None,
+    update_found: Optional[Dict[str, Any]] = None,
+    if_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Move the stored cursor to the previous item and return it and its path.
 
     Accepts the same options as `next_item`; with `skip_children` it moves to the
     previous sibling without entering its subtree, or to the parent when there is none.
     """
-    return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek)
+    return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash)
 
 
-def get_item(tree_id: str, path: Optional[List[int]] = None, depth: int = 0) -> Dict[str, Any]:
+def get_item(
+    tree_id: str,
+    path: Optional[List[int]] = None,
+    depth: int = 0,
+    cursor: Optional[str] = None,
+) -> Dict[str, Any]:
     """Return the item at the path, or at the cursor when path is not given.
 
-    `depth` works as in `next_item`.
+    `depth` works as in `next_item`; `cursor` names the cursor to use.
     """
     entry = _load_tree(tree_id)
-    path = entry.get("cursor_path", []) if path is None else path
+    path = entry["cursors"].get(_cursor_name(cursor), []) if path is None else path
     traversal = DictTraversal(entry["data"], children_field=entry["children_field"])
     traversal.set_path_as_current(path)
     return _item_response(traversal.current, traversal.path, entry["children_field"], depth)
@@ -662,7 +723,11 @@ def search(
                 (item, item_path) for item, item_path in results
                 if label_field in item and pattern.search(str(item[label_field]))
             ]
-    matches = [{"item": item, "path": base + item_path} for item, item_path in results]
+    children_field = entry["children_field"]
+    matches = [
+        {"item": item, "path": base + item_path, "hash": _item_hash(item, children_field)}
+        for item, item_path in results
+    ]
     if order_by:
         matches = _order_matches(matches, order_by)
     return {"matches": matches[:limit], "total": len(matches)}
@@ -675,14 +740,31 @@ def save_tree(
     tree_id: Optional[str] = None,
     validate: bool = True,
     schema: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
+    override_policy: bool = False,
 ) -> Dict[str, Any]:
-    """Persist a tree for later access by tree_id."""
+    """Persist a tree for later access by tree_id.
+
+    `policy` limits later edits: {"editable_fields": [...]} allows changing only those
+    fields, {"readonly_fields": [...]} protects fields, and {"lock_structure": true} forbids
+    adding, inserting, replacing and deleting items. Replacing an existing tree that has a
+    policy requires `override_policy=True`. The policy is a guardrail for agents, not access control.
+    """
+    policy = _normalize_policy(policy)
     schema_to_use = schema
-    if tree_id and schema_to_use is None:
+    existing = None
+    if tree_id:
         try:
-            schema_to_use = storage.get_tree(tree_id).get("schema")
+            existing = storage.get_tree(tree_id, include_data=False)
         except KeyError:
-            schema_to_use = None
+            existing = None
+    if existing and existing.get("policy") and not override_policy:
+        raise ValueError(
+            "The tree has an edit policy. Edit it with apply_tree_ops, or pass "
+            "override_policy=true to replace the whole tree."
+        )
+    if existing and schema_to_use is None:
+        schema_to_use = existing.get("schema")
     if validate:
         validate_data(data, children_field, label_field)
         _validate_tree_schema(data, children_field, schema_to_use)
@@ -692,6 +774,7 @@ def save_tree(
         label_field,
         tree_id=tree_id,
         schema=schema_to_use,
+        policy=policy,
     )
 
 
@@ -732,7 +815,10 @@ def _is_prefix(prefix: List[int], path: List[int]) -> bool:
 def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     children_field = entry["children_field"]
     traversal = DictTraversal(entry["data"], children_field=children_field)
-    cursor = list(entry.get("cursor_path", []))
+    cursors = {
+        name: list(path)
+        for name, path in (entry.get("cursors") or {storage.DEFAULT_CURSOR: entry.get("cursor_path", [])}).items()
+    }
     changed: List[Dict[str, Any]] = []
 
     for op in ops:
@@ -744,6 +830,12 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
             raise ValueError(f"{name} requires an item dictionary.")
         if name in ("replace_child", "delete_child") and not path:
             raise ValueError(f"{name} requires a path to the child.")
+        if name in ("add_child", "insert_child", "replace_child", "delete_child"):
+            _check_structure_policy(entry, name)
+        if op.get("if_hash") is not None:
+            traversal.set_path_as_current(path)
+            _check_hash(traversal.current, children_field, path, op["if_hash"])
+            traversal.current, traversal.path = traversal, []
 
         if name == "add_child":
             traversal.set_path_as_current(path)
@@ -760,14 +852,18 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
             changed.append(item)
             # Siblings at and after the index move one step forward
             depth = len(path)
-            if len(cursor) > depth and _is_prefix(path, cursor) and cursor[depth] >= index:
-                cursor[depth] += 1
+            for cursor in cursors.values():
+                if len(cursor) > depth and _is_prefix(path, cursor) and cursor[depth] >= index:
+                    cursor[depth] += 1
         elif name == "modify":
             changes = op.get("changes") or {}
             key = op.get("key")
             if key is None and not changes:
                 raise ValueError("modify requires key/value or changes.")
             traversal.set_path_as_current(path)
+            updates = {**changes, **({key: op.get("value")} if key is not None else {})}
+            current = traversal.current
+            _check_field_policy(entry, [k for k, v in updates.items() if k not in current or current[k] != v])
             if key is not None:
                 traversal.modify(key=key, value=op.get("value"))
             if changes:
@@ -775,26 +871,73 @@ def _apply_ops(entry: Dict[str, Any], tree_id: str, ops: List[Dict[str, Any]]) -
             changed.append({k: v for k, v in traversal.current.items() if k != children_field})
         elif name == "replace_child":
             traversal.set_path_as_current(path[:-1])
+            old = traversal[path[-1]]
+            _check_field_policy(entry, [
+                k for k in {*old, *item}
+                if k != children_field and (k not in old or k not in item or old[k] != item[k])
+            ])
             traversal.replace_child(path[-1], **item)
             changed.append(item)
             # The old subtree is gone, so a cursor inside it falls back to the replaced item
-            if len(cursor) > len(path) and _is_prefix(path, cursor):
-                cursor = list(path)
+            for cursor_name, cursor in cursors.items():
+                if len(cursor) > len(path) and _is_prefix(path, cursor):
+                    cursors[cursor_name] = list(path)
         elif name == "delete_child":
             parent, index, depth = path[:-1], path[-1], len(path) - 1
-            if _is_prefix(path, cursor):
-                # Cursor was in the deleted subtree: move it to the item before,
-                # so that next_item continues from the item that took its place.
-                traversal.set_path_as_current(path)
-                _, cursor = traversal.get_previous_item_and_path()
-                traversal.current, traversal.path = traversal, []
-            elif len(cursor) > depth and _is_prefix(parent, cursor) and cursor[depth] > index:
-                cursor[depth] -= 1
+            # A cursor in the deleted subtree moves to the item before it,
+            # so that next_item continues from the item that took its place.
+            traversal.set_path_as_current(path)
+            _, previous_path = traversal.get_previous_item_and_path()
+            traversal.current, traversal.path = traversal, []
+            for cursor_name, cursor in cursors.items():
+                if _is_prefix(path, cursor):
+                    cursors[cursor_name] = list(previous_path)
+                elif len(cursor) > depth and _is_prefix(parent, cursor) and cursor[depth] > index:
+                    cursor[depth] -= 1
             del traversal[path]
         else:
             raise ValueError(f"Unsupported operation: {name}")
 
-    return _save_traversal(traversal, entry, tree_id, changed_items=changed, cursor_path=cursor)
+    return _save_traversal(traversal, entry, tree_id, changed_items=changed, cursors=cursors)
+
+
+POLICY_KEYS = {"editable_fields", "readonly_fields", "lock_structure"}
+
+
+def _normalize_policy(policy: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if policy is None:
+        return None
+    if not isinstance(policy, dict) or set(policy) - POLICY_KEYS:
+        raise ValueError(f"policy must be an object with keys {sorted(POLICY_KEYS)}.")
+    for key in ("editable_fields", "readonly_fields"):
+        fields = policy.get(key)
+        if fields is not None and (not isinstance(fields, list) or not all(isinstance(f, str) for f in fields)):
+            raise ValueError(f"policy.{key} must be a list of field names.")
+    if not isinstance(policy.get("lock_structure", False), bool):
+        raise ValueError("policy.lock_structure must be true or false.")
+    return policy
+
+
+def _check_structure_policy(entry: Dict[str, Any], name: str) -> None:
+    # A guardrail against accidental edits by agents, not an access control
+    if (entry.get("policy") or {}).get("lock_structure"):
+        raise ValueError(f"The tree policy locks its structure, so {name} is not allowed.")
+
+
+def _check_field_policy(entry: Dict[str, Any], changed_fields: List[str]) -> None:
+    policy = entry.get("policy") or {}
+    if not policy or not changed_fields:
+        return
+    children_field = entry["children_field"]
+    editable = policy.get("editable_fields")
+    readonly = set(policy.get("readonly_fields") or [])
+    blocked = {
+        field for field in changed_fields
+        if (editable is not None and field not in editable) or field in readonly
+        or (field == children_field and policy.get("lock_structure"))
+    }
+    if blocked:
+        raise ValueError(f"The tree policy does not allow changing {sorted(blocked)}.")
 
 
 def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -804,6 +947,9 @@ def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
     - add_child {path: parent, item}, insert_child {path: parent, index, item}
     - modify {path, changes} or {path, key, value}
     - replace_child {path, item}, delete_child {path}
-    Only changed items are validated, and the stored cursor follows inserts and deletes.
+    Any op may carry "if_hash": the hash of the item at its path as last read. If the
+    item changed, or the path now points to another item, the whole batch is rejected.
+    Only changed items are validated, and the stored cursors follow inserts and deletes.
     """
-    return _apply_ops(storage.get_tree(tree_id), tree_id, ops)
+    with storage.tree_lock(tree_id):
+        return _apply_ops(storage.get_tree(tree_id), tree_id, ops)

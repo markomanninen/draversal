@@ -78,9 +78,10 @@ class TestStoreCli(unittest.TestCase):
         data = {"title": "root", "sections": []}
         storage.save_tree(data, "sections", label_field="title")
         (self.store_dir / "gone.json.cursor").write_text("[]")
+        (self.store_dir / "gone.json.lock").write_text("")
 
         output, code = self._run_cli(["prune"])
-        self.assertEqual(json.loads(output)["removed_files"], 1)
+        self.assertEqual(json.loads(output)["removed_files"], 2)
         self.assertEqual(len(list(self.store_dir.glob("*.json.cursor"))), 1)
 
 
