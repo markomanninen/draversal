@@ -17,6 +17,13 @@ and notes on very deep trees (iteration cost and recursion limit).
 `docs/background.md` describes the purpose (economical task-list browsing over MCP),
 comparable MCP servers and libraries, and where the cost of an MCP call goes.
 
+## Human view
+
+`draversal-ui` serves a live, read-only web page of the tree store at
+`http://127.0.0.1:8765/`: task status badges, where each agent's named cursor is,
+and which items just changed. It uses only the standard library and listens on
+localhost by default. See [`docs/ui.md`](docs/ui.md).
+
 
 ---
 

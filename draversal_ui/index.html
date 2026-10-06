@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>draversal trees</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #1c1f24; --muted: #697080; --border: #e1e4ea;
+  --hover: #eff2f6; --select: #e3ecfd; --accent: #2f6fdf;
+  --flash: #ffe28a; --flash-sub: #fff3c4;
+  --badge-l: 90%; --badge-fg-l: 26%; --badge-s-mul: 1;
+  --live: #1f9d55; --wait: #d99a0b; --down: #d64545;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --panel: #1b1e24; --fg: #e3e6ec; --muted: #969dab; --border: #2c3039;
+    --hover: #232731; --select: #22314d; --accent: #78a6ff;
+    --flash: #6b5714; --flash-sub: #3d3418;
+    --badge-l: 24%; --badge-fg-l: 82%;
+    --live: #3cc77a; --wait: #e5b03a; --down: #ef6b6b;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex; flex-direction: column;
+}
+button, input { font: inherit; color: inherit; }
+header.top {
+  display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); background: var(--panel);
+}
+header.top h1 { font-size: 15px; margin: 0; }
+header.top .store { color: var(--muted); font-family: var(--mono); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--wait); display: inline-block; }
+.conn.live i { background: var(--live); }
+.conn.down i { background: var(--down); }
+#app { flex: 1; display: flex; min-height: 0; }
+#sidebar { width: 300px; flex: none; border-right: 1px solid var(--border); overflow: auto; background: var(--panel); }
+#sidebar .empty { padding: 16px; color: var(--muted); }
+.tree-item { display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+  padding: 9px 14px; border-bottom: 1px solid var(--border); }
+.tree-item:hover { background: var(--hover); }
+.tree-item.active { background: var(--select); }
+.tree-item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-item .meta { color: var(--muted); font-size: 12px; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.tree-item.flash { animation: flash 2.4s ease-out; }
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#treeHeader { padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); }
+#treeHeader .title { font-size: 16px; font-weight: 600; }
+#treeHeader .facts { color: var(--muted); font-size: 12px; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+#treeHeader .facts b { color: var(--fg); font-weight: 500; }
+#toolbar { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+#filter { flex: 1; max-width: 420px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+#toolbar button { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); cursor: pointer; }
+#toolbar button:hover { background: var(--hover); }
+#toolbar .hint { color: var(--muted); font-size: 12px; }
+#outline { flex: 1; overflow: auto; padding: 6px 0 40px; min-height: 0; }
+#outline .notice { padding: 24px 16px; color: var(--muted); }
+.row { display: flex; align-items: center; gap: 7px; padding: 2px 16px 2px 0; min-height: 26px; cursor: default; white-space: nowrap; }
+.row:hover { background: var(--hover); }
+.row.selected { background: var(--select); }
+.row.flash { animation: flash 2.4s ease-out; }
+.row.flash-sub { animation: flash-sub 2.4s ease-out; }
+@keyframes flash { from { background: var(--flash); } to { background: transparent; } }
+@keyframes flash-sub { from { background: var(--flash-sub); } to { background: transparent; } }
+.tog { width: 18px; flex: none; text-align: center; color: var(--muted); cursor: pointer; user-select: none; font-size: 13px; }
+.tog.leaf { cursor: default; }
+.label { font-weight: 500; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.kcount { color: var(--muted); font-size: 12px; flex: none; }
+.fields { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
+.fields .k { opacity: .8; }
+.badge, .chip { display: inline-block; font-size: 11px; line-height: 17px; padding: 0 7px; border-radius: 9px; flex: none; white-space: nowrap; }
+.badge { background: hsl(var(--h) calc(var(--s) * 1%) var(--badge-l)); color: hsl(var(--h) calc(var(--s) * 1%) var(--badge-fg-l)); font-weight: 600; }
+.chip { border: 1.5px solid hsl(var(--h) 65% 50%); color: hsl(var(--h) 65% 45%); font-weight: 600; font-family: var(--mono); }
+@media (prefers-color-scheme: dark) { .chip { color: hsl(var(--h) 75% 70%); } }
+.chip::before { content: "\25B8 "; }
+.more { margin: 2px 0; padding: 2px 10px; border: 1px dashed var(--border); border-radius: 6px; background: none; color: var(--accent); cursor: pointer; font-size: 12px; }
+#details { border-top: 1px solid var(--border); background: var(--panel); max-height: 34%; overflow: auto; padding: 8px 16px; display: none; }
+#details.open { display: block; }
+#details .dhead { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; }
+#details .dhead button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 14px; }
+#details pre { margin: 6px 0 0; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 720px) {
+  #app { flex-direction: column; }
+  #sidebar { width: auto; max-height: 30%; border-right: 0; border-bottom: 1px solid var(--border); }
+  header.top .store { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>draversal</h1>
+  <span class="store" title="Tree store">__STORE_PATH__</span>
+  <span id="conn" class="conn" title="Live updates"><i></i><span>connecting</span></span>
+</header>
+<div id="app">
+  <aside id="sidebar"><div id="treeList"><div class="empty">Loading trees...</div></div></aside>
+  <main>
+    <div id="treeHeader"><div class="title">No tree selected</div></div>
+    <div id="toolbar">
+      <input id="filter" type="search" placeholder="Filter items (label or field values)" autocomplete="off">
+      <span id="filterInfo" class="hint"></span>
+      <button id="collapseAll" type="button" title="Collapse everything except the root">Collapse all</button>
+    </div>
+    <div id="outline"><div class="notice">Select a tree.</div></div>
+    <div id="details"></div>
+  </main>
+</div>
+<script>
+"use strict";
+(function () {
+  const CHUNK = 200;            // children rendered per "show more" step
+  const STATUS_RE = /^(status|state|passes|passed|done|completed?)$/i;
+  const MAX_FIELDS = 4;
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    list: $("treeList"), header: $("treeHeader"), outline: $("outline"), filter: $("filter"),
+    filterInfo: $("filterInfo"), details: $("details"), conn: $("conn"),
+  };
+
+  const S = {
+    trees: [],
+    current: null,        // tree id
+    entry: null,          // full entry of the current tree
+    index: null,          // Map pathKey -> {json, text}
+    jsonCounts: null,     // Map own-fields JSON -> count, for change detection
+    view: null,           // per-tree view state, see viewState()
+    filterQuery: "",
+    filterVisible: null,  // Set of path keys shown while filtering, or null
+    rows: new Map(),      // pathKey -> row element currently rendered
+    deleted: false,
+  };
+  const views = new Map();  // tree id -> view state, kept while switching trees
+  const prevListStamp = new Map();
+
+  function viewState(id) {
+    if (!views.has(id)) {
+      views.set(id, { expanded: new Set([""]), shown: new Map(), scrollTop: 0, selected: null, cursorSeen: {} });
+    }
+    return views.get(id);
+  }
+
+  // ---------- helpers ----------
+  const keyOf = (path) => path.join("/");
+  const pathOf = (key) => (key === "" ? [] : key.split("/").map(Number));
+  function ancestorsOf(key) {
+    const out = [""];
+    if (key === "") return [];
+    const parts = key.split("/");
+    for (let i = 1; i < parts.length; i++) out.push(parts.slice(0, i).join("/"));
+    return out;
+  }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function hashStr(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function fmtValue(v, max) {
+    let s = typeof v === "string" ? v : JSON.stringify(v);
+    if (s === undefined) s = String(v);
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  }
+  function ago(iso) {
+    if (!iso) return "";
+    const t = Date.parse(iso);
+    if (isNaN(t)) return iso;
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return new Date(t).toLocaleString();
+  }
+  // Generic status tone: common words get a meaning, anything else a stable hashed hue.
+  function tone(v) {
+    if (v === true) return [140, 55];
+    if (v === false || v === null) return [0, 0];
+    const s = String(v).toLowerCase().trim();
+    if (/^(done|complete|completed|pass|passed|passing|ok|success|succeeded|finished|closed|resolved|merged|yes|true|accepted|shipped)$/.test(s)) return [140, 55];
+    if (/(fail|error|block|reject|cancel|abort|broken|stuck)/.test(s)) return [2, 65];
+    if (/(doing|progress|active|running|started|wip|review|claimed|working|ongoing)/.test(s)) return [212, 70];
+    if (/^(todo|to do|open|new|pending|backlog|queued|waiting|planned|not started|no|false|none|idle)$/.test(s)) return [220, 0];
+    return [hashStr(s) % 360, 55];
+  }
+  function setHue(e, h, s) { e.style.setProperty("--h", h); e.style.setProperty("--s", s); }
+  function cursorChip(name) {
+    const c = el("span", "chip", name);
+    setHue(c, name === "default" ? 215 : hashStr(name) % 360, 0);
+    c.title = "Cursor " + name;
+    return c;
+  }
+  function cursorsOf(entry) {
+    const c = entry && entry.cursors;
+    if (c && typeof c === "object") return c;
+    return { default: (entry && entry.cursor_path) || [] };
+  }
+
+  async function getJSON(url) {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) { const e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
+    return r.json();
+  }
+
+  // ---------- tree list ----------
+  let listTimer = null, listBusy = false, listAgain = false;
+  function scheduleList(delay) {
+    clearTimeout(listTimer);
+    listTimer = setTimeout(loadList, delay === undefined ? 250 : delay);
+  }
+  async function loadList() {
+    if (listBusy) { listAgain = true; return; }
+    listBusy = true;
+    try {
+      S.trees = await getJSON("/api/trees");
+      renderList();
+      if (!S.current && S.trees.length && !location.hash) {
+        location.replace("#" + encodeURIComponent(S.trees[0].tree_id));
+      }
+    } catch (e) {
+      els.list.textContent = "";
+      els.list.appendChild(el("div", "empty", "Could not load trees: " + e.message));
+    } finally {
+      listBusy = false;
+      if (listAgain) { listAgain = false; loadList(); }
+    }
+  }
+  function treeName(t) {
+    if (t.root_label !== null && t.root_label !== undefined && t.root_label !== "") return fmtValue(t.root_label, 80);
+    return t.tree_id;
+  }
+  function renderList() {
+    const box = els.list;
+    const scroll = box.parentElement.scrollTop;
+    box.textContent = "";
+    if (!S.trees.length) { box.appendChild(el("div", "empty", "The store has no trees yet.")); return; }
+    for (const t of S.trees) {
+      const b = el("button", "tree-item" + (t.tree_id === S.current ? " active" : ""));
+      b.type = "button";
+      b.title = t.tree_id;
+      b.appendChild(el("div", "name", treeName(t)));
+      const meta = el("div", "meta");
+      meta.appendChild(el("span", "", (t.count != null ? t.count : "?") + " items"));
+      meta.appendChild(el("span", "", ago(t.updated_at)));
+      for (const name of Object.keys(cursorsOf(t)).sort()) meta.appendChild(cursorChip(name));
+      b.appendChild(meta);
+      const stamp = t.updated_at + "|" + JSON.stringify(cursorsOf(t));
+      if (prevListStamp.has(t.tree_id) && prevListStamp.get(t.tree_id) !== stamp) b.classList.add("flash");
+      prevListStamp.set(t.tree_id, stamp);
+      b.addEventListener("click", () => { location.hash = "#" + encodeURIComponent(t.tree_id); });
+      box.appendChild(b);
+    }
+    box.parentElement.scrollTop = scroll;
+  }
+
+  // ---------- current tree ----------
+  let treeBusy = false, treeAgain = null;
+  function requestTree(kind) {
+    if (!S.current) return;
+    if (treeBusy) { treeAgain = treeAgain === "data" || kind === "data" ? "data" : "cursor"; return; }
+    treeBusy = true;
+    const id = S.current;
+    const wantData = kind === "data" || !S.entry;
+    getJSON("/api/trees/" + encodeURIComponent(id) + (wantData ? "" : "?data=0"))
+      .then((entry) => { if (id === S.current) applyEntry(entry, wantData); })
+      .catch((e) => {
+        if (id !== S.current) return;
+        if (e.status === 404) showDeleted();
+        else showNotice("Could not load the tree: " + e.message);
+      })
+      .finally(() => {
+        treeBusy = false;
+        if (treeAgain) { const k = treeAgain; treeAgain = null; requestTree(k); }
+      });
+  }
+
+  function buildIndex(data, cf) {
+    const index = new Map();
+    const counts = new Map();
+    const stack = [[data, ""]];
+    while (stack.length) {
+      const [item, key] = stack.pop();
+      if (!item || typeof item !== "object") continue;
+      const own = {};
+      for (const k in item) if (k !== cf) own[k] = item[k];
+      const json = JSON.stringify(own);
+      index.set(key, { json: json, text: json.toLowerCase() });
+      counts.set(json, (counts.get(json) || 0) + 1);
+      const kids = item[cf];
+      if (Array.isArray(kids)) {
+        for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], key === "" ? String(i) : key + "/" + i]);
+      }
+    }
+    return { index, counts };
+  }
+
+  // An item changed if its own fields at that path differ and that exact content did not
+  // exist anywhere before. The second check keeps siblings shifted by an insert or delete quiet.
+  function changedKeys(oldIndex, oldCounts, newIndex) {
+    const out = [];
+    if (!oldIndex) return out;
+    for (const [key, info] of newIndex) {
+      const before = oldIndex.get(key);
+      if ((!before || before.json !== info.json) && !oldCounts.has(info.json)) out.push(key);
+    }
+    return out;
+  }
+
+  function applyEntry(entry, withData) {
+    S.deleted = false;
+    const v = S.view;
+    let changed = [];
+    if (withData) {
+      const built = buildIndex(entry.data, entry.children_field);
+      changed = changedKeys(S.index, S.jsonCounts, built.index);
+      S.index = built.index;
+      S.jsonCounts = built.counts;
+      S.entry = entry;
+    } else {
+      const data = S.entry.data;
+      S.entry = Object.assign({}, entry, { data: data });
+    }
+    // Expand ancestors of cursors that moved since last seen (and on first load)
+    const cursors = cursorsOf(S.entry);
+    for (const name of Object.keys(cursors)) {
+      const key = keyOf(cursors[name] || []);
+      if (v.cursorSeen[name] !== key) {
+        v.cursorSeen[name] = key;
+        revealKey(key);
+      }
+    }
+    if (S.filterQuery) computeFilter();
+    renderHeader();
+    renderOutline(changed);
+  }
+
+  // Expand ancestors of key and make sure it is within the "show more" window
+  function revealKey(key) {
+    if (!S.index || !S.index.has(key)) return;
+    const v = S.view;
+    const path = pathOf(key);
+    for (let i = 0; i < path.length; i++) {
+      const parentKey = keyOf(path.slice(0, i));
+      v.expanded.add(parentKey);
+      const need = Math.ceil((path[i] + 1) / CHUNK) * CHUNK;
+      if ((v.shown.get(parentKey) || CHUNK) < need) v.shown.set(parentKey, need);
+    }
+  }
+
+  function showNotice(text) {
+    els.outline.textContent = "";
+    els.outline.appendChild(el("div", "notice", text));
+  }
+  function showDeleted() {
+    S.deleted = true;
+    S.entry = null; S.index = null; S.jsonCounts = null;
+    showNotice("This tree was deleted from the store.");
+    els.details.classList.remove("open");
+  }
+
+  function policyText(p) {
+    if (!p || typeof p !== "object" || !Object.keys(p).length) return "none";
+    const parts = [];
+    if (p.editable_fields) parts.push("editable: " + p.editable_fields.join(", "));
+    if (p.readonly_fields) parts.push("read-only: " + p.readonly_fields.join(", "));
+    if (p.lock_structure) parts.push("structure locked");
+    for (const k of Object.keys(p)) {
+      if (!["editable_fields", "readonly_fields", "lock_structure"].includes(k)) parts.push(k + ": " + fmtValue(p[k], 40));
+    }
+    return parts.join(" · ") || "none";
+  }
+  function fact(label, value) {
+    const s = el("span", "", label + " ");
+    s.appendChild(el("b", "", value));
+    return s;
+  }
+  function renderHeader() {
+    const e = S.entry;
+    const h = els.header;
+    h.textContent = "";
+    const lf = e.label_field;
+    const label = lf && e.data && e.data[lf] !== undefined ? fmtValue(e.data[lf], 120) : e.tree_id;
+    h.appendChild(el("div", "title", label));
+    const f = el("div", "facts");
+    f.appendChild(fact("items", String(e.count)));
+    f.appendChild(fact("updated", ago(e.updated_at)));
+    f.appendChild(fact("policy", policyText(e.policy)));
+    f.appendChild(fact("schema", e.schema ? "yes" : "no"));
+    f.appendChild(fact("children", e.children_field + (lf ? ", label " + lf : "")));
+    const ids = el("span", "", "id ");
+    ids.appendChild(el("b", "", e.tree_id));
+    f.appendChild(ids);
+    h.appendChild(f);
+  }
+
+  // ---------- outline ----------
+  function itemLabel(item, key) {
+    const lf = S.entry.label_field;
+    if (lf && item[lf] !== undefined) return fmtValue(item[lf], 160);
+    for (const k in item) if (k !== S.entry.children_field && typeof item[k] === "string") return fmtValue(item[k], 160);
+    return key === "" ? "(root)" : "#" + key.split("/").pop();
+  }
+
+  function buildRow(item, key, depth, cursorMap) {
+    const cf = S.entry.children_field;
+    const lf = S.entry.label_field;
+    const kids = Array.isArray(item[cf]) ? item[cf] : [];
+    const row = el("div", "row");
+    row.dataset.key = key;
+    row.style.paddingLeft = (6 + depth * 18) + "px";
+    if (key === S.view.selected) row.classList.add("selected");
+    const open = isOpen(key);
+    const tog = el("span", "tog" + (kids.length ? "" : " leaf"), kids.length ? (open ? "▾" : "▸") : "·");
+    row.appendChild(tog);
+    row.appendChild(el("span", "label", itemLabel(item, key)));
+    if (kids.length) row.appendChild(el("span", "kcount", "(" + kids.length + ")"));
+    const summary = [];
+    for (const k in item) {
+      if (k === cf || k === lf) continue;
+      const v = item[k];
+      if (STATUS_RE.test(k) && (typeof v !== "object" || v === null)) {
+        const b = el("span", "badge", typeof v === "boolean" ? (v ? "✓ " : "✗ ") + k : String(v));
+        const t = tone(v);
+        setHue(b, t[0], t[1]);
+        b.title = k + ": " + JSON.stringify(v);
+        row.appendChild(b);
+      } else {
+        summary.push(k);
+      }
+    }
+    const names = cursorMap.get(key);
+    if (names) for (const n of names) row.appendChild(cursorChip(n));
+    if (summary.length) {
+      const f = el("span", "fields");
+      summary.slice(0, MAX_FIELDS).forEach((k, i) => {
+        if (i) f.appendChild(document.createTextNode("  ·  "));
+        f.appendChild(el("span", "k", k + ": "));
+        f.appendChild(document.createTextNode(fmtValue(item[k], 48)));
+      });
+      if (summary.length > MAX_FIELDS) f.appendChild(document.createTextNode("  +" + (summary.length - MAX_FIELDS)));
+      row.appendChild(f);
+    }
+    S.rows.set(key, row);
+    return row;
+  }
+
+  function isOpen(key) {
+    if (S.filterVisible) return S.filterAncestors.has(key) || S.view.expanded.has(key);
+    return S.view.expanded.has(key);
+  }
+
+  function renderNode(parent, item, key, depth, cursorMap) {
+    const node = el("div", "node");
+    node.appendChild(buildRow(item, key, depth, cursorMap));
+    parent.appendChild(node);
+    if (isOpen(key)) renderChildren(node, item, key, depth, cursorMap);
+  }
+
+  function renderChildren(node, item, key, depth, cursorMap) {
+    const cf = S.entry.children_field;
+    const kids = Array.isArray(item[cf]) ? item[cf] : [];
+    if (!kids.length) return;
+    const box = el("div", "kids");
+    const limit = S.view.shown.get(key) || CHUNK;
+    let rendered = 0, remaining = 0;
+    for (let i = 0; i < kids.length; i++) {
+      const child = kids[i];
+      if (!child || typeof child !== "object") continue;
+      const ck = key === "" ? String(i) : key + "/" + i;
+      if (S.filterVisible && !S.filterVisible.has(ck)) continue;
+      if (rendered >= limit) { remaining++; continue; }
+      renderNode(box, child, ck, depth + 1, cursorMap);
+      rendered++;
+    }
+    if (remaining) {
+      const more = el("button", "more", "Show " + Math.min(CHUNK, remaining) + " more of " + remaining);
+      more.type = "button";
+      more.style.marginLeft = (30 + (depth + 1) * 18) + "px";
+      more.addEventListener("click", () => {
+        S.view.shown.set(key, limit + CHUNK);
+        box.remove();
+        renderChildren(node, item, key, depth, cursorMapNow());
+      });
+      box.appendChild(more);
+    }
+    node.appendChild(box);
+  }
+
+  function cursorMapNow() {
+    const m = new Map();
+    const cursors = cursorsOf(S.entry);
+    for (const name of Object.keys(cursors).sort()) {
+      const k = keyOf(cursors[name] || []);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(name);
+    }
+    return m;
+  }
+
+  function itemAt(key) {
+    let item = S.entry.data;
+    const cf = S.entry.children_field;
+    for (const i of pathOf(key)) {
+      const kids = item && Array.isArray(item[cf]) ? item[cf] : null;
+      if (!kids || !kids[i]) return null;
+      item = kids[i];
+    }
+    return item;
+  }
+
+  // Keep the row at the top of the viewport in place across a re-render
+  function topAnchor() {
+    const r = els.outline.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + 40, r.top + 6);
+    const row = hit && hit.closest ? hit.closest(".row") : null;
+    return row && els.outline.contains(row) ? { key: row.dataset.key, top: row.getBoundingClientRect().top } : null;
+  }
+
+  function renderOutline(changed) {
+    if (!S.entry) return;
+    const anchor = topAnchor();
+    const scroll = els.outline.scrollTop;
+    S.rows = new Map();
+    const frag = document.createDocumentFragment();
+    renderNode(frag, S.entry.data, "", 0, cursorMapNow());
+    els.outline.textContent = "";
+    els.outline.appendChild(frag);
+    const again = anchor && S.rows.get(anchor.key);
+    if (again) els.outline.scrollTop += again.getBoundingClientRect().top - anchor.top;
+    else els.outline.scrollTop = scroll;
+    flash(changed || []);
+    renderDetails();
+  }
+
+  function flash(keys) {
+    const subs = new Set();
+    for (const key of keys) {
+      const row = S.rows.get(key);
+      if (row) { restartAnim(row, "flash"); continue; }
+      // Not rendered (collapsed or filtered): mark the nearest visible ancestor
+      const anc = ancestorsOf(key);
+      for (let i = anc.length - 1; i >= 0; i--) {
+        if (S.rows.has(anc[i])) { subs.add(anc[i]); break; }
+      }
+    }
+    for (const k of subs) restartAnim(S.rows.get(k), "flash-sub");
+  }
+  function restartAnim(row, cls) {
+    row.classList.remove(cls);
+    void row.offsetWidth;
+    row.classList.add(cls);
+    row.addEventListener("animationend", () => row.classList.remove(cls), { once: true });
+  }
+
+  function toggle(key) {
+    const row = S.rows.get(key);
+    if (!row) return;
+    const node = row.parentElement;
+    const item = itemAt(key);
+    if (!item) return;
+    const kids = Array.isArray(item[S.entry.children_field]) ? item[S.entry.children_field] : [];
+    if (!kids.length) return;
+    const tog = row.querySelector(".tog");
+    const box = node.querySelector(":scope > .kids");
+    if (box) {
+      S.view.expanded.delete(key);
+      if (S.filterAncestors) S.filterAncestors.delete(key);
+      box.remove();
+      tog.textContent = "▸";
+    } else {
+      S.view.expanded.add(key);
+      const depth = key === "" ? 0 : key.split("/").length;
+      renderChildren(node, item, key, depth, cursorMapNow());
+      tog.textContent = "▾";
+    }
+  }
+
+  function select(key) {
+    const prev = S.view.selected;
+    if (prev !== null && S.rows.has(prev)) S.rows.get(prev).classList.remove("selected");
+    S.view.selected = prev === key ? null : key;
+    if (S.view.selected !== null && S.rows.has(key)) S.rows.get(key).classList.add("selected");
+    renderDetails();
+  }
+
+  function renderDetails() {
+    const d = els.details;
+    const key = S.view ? S.view.selected : null;
+    const item = key !== null && S.entry ? itemAt(key) : null;
+    if (!item) { d.classList.remove("open"); d.textContent = ""; return; }
+    const cf = S.entry.children_field;
+    const own = {};
+    for (const k in item) if (k !== cf) own[k] = item[k];
+    d.textContent = "";
+    const head = el("div", "dhead");
+    const kids = Array.isArray(item[cf]) ? item[cf].length : 0;
+    head.appendChild(el("span", "", "path [" + pathOf(key).join(", ") + "]  ·  " + kids + " children"));
+    const close = el("button", "", "×");
+    close.type = "button";
+    close.title = "Close";
+    close.addEventListener("click", () => select(key));
+    head.appendChild(close);
+    d.appendChild(head);
+    d.appendChild(el("pre", "", JSON.stringify(own, null, 2)));
+    d.classList.add("open");
+  }
+
+  els.outline.addEventListener("click", (ev) => {
+    const row = ev.target.closest(".row");
+    if (!row) return;
+    if (ev.target.classList.contains("tog")) toggle(row.dataset.key);
+    else select(row.dataset.key);
+  });
+  els.outline.addEventListener("dblclick", (ev) => {
+    const row = ev.target.closest(".row");
+    if (row && !ev.target.classList.contains("tog")) { toggle(row.dataset.key); window.getSelection().removeAllRanges(); }
+  });
+  els.outline.addEventListener("scroll", () => { if (S.view) S.view.scrollTop = els.outline.scrollTop; }, { passive: true });
+
+  $("collapseAll").addEventListener("click", () => {
+    if (!S.view) return;
+    S.view.expanded = new Set([""]);
+    S.view.shown = new Map();
+    if (S.filterQuery) computeFilter();
+    renderOutline([]);
+  });
+
+  // ---------- filter ----------
+  S.filterAncestors = null;
+  function computeFilter() {
+    const q = S.filterQuery;
+    if (!q || !S.index) { S.filterVisible = null; S.filterAncestors = null; els.filterInfo.textContent = ""; return; }
+    const visible = new Set(), anc = new Set();
+    let matches = 0;
+    for (const [key, info] of S.index) {
+      if (info.text.indexOf(q) === -1) continue;
+      matches++;
+      visible.add(key);
+      for (const a of ancestorsOf(key)) { visible.add(a); anc.add(a); }
+    }
+    visible.add("");
+    S.filterVisible = visible;
+    S.filterAncestors = anc;
+    els.filterInfo.textContent = matches + (matches === 1 ? " match" : " matches");
+  }
+  let filterTimer = null;
+  els.filter.addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      S.filterQuery = els.filter.value.trim().toLowerCase();
+      computeFilter();
+      if (S.entry) { els.outline.scrollTop = 0; renderOutline([]); }
+    }, 150);
+  });
+
+  // ---------- routing ----------
+  function selectFromHash() {
+    let id = null;
+    try { id = location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : null; } catch (e) { id = null; }
+    if (id === S.current) return;
+    if (S.view && S.current) S.view.scrollTop = els.outline.scrollTop;
+    S.current = id;
+    S.entry = null; S.index = null; S.jsonCounts = null; S.deleted = false;
+    S.view = id ? viewState(id) : null;
+    renderList();
+    els.details.classList.remove("open");
+    if (!id) { showNotice("Select a tree."); return; }
+    showNotice("Loading...");
+    const v = S.view;
+    const restore = v.scrollTop;
+    treeAgain = null;
+    getJSON("/api/trees/" + encodeURIComponent(id))
+      .then((entry) => {
+        if (id !== S.current) return;
+        applyEntry(entry, true);
+        els.outline.scrollTop = restore;
+      })
+      .catch((e) => {
+        if (id !== S.current) return;
+        if (e.status === 404) showDeleted(); else showNotice("Could not load the tree: " + e.message);
+      });
+  }
+  window.addEventListener("hashchange", selectFromHash);
+
+  // ---------- live updates ----------
+  function setConn(state, text) {
+    els.conn.className = "conn" + (state === "live" ? " live" : state === "down" ? " down" : "");
+    els.conn.lastChild.textContent = text;
+  }
+  function onChange(ev) {
+    scheduleList();
+    if (ev.tree_id !== S.current) return;
+    if (ev.kind === "deleted") { showDeleted(); return; }
+    requestTree(ev.kind === "cursor" && S.entry ? "cursor" : "data");
+  }
+  function resync() {
+    scheduleList(0);
+    if (S.current) requestTree("data");
+  }
+  let es = null, retry = 1000, opened = false;
+  function connect() {
+    setConn("wait", "connecting");
+    es = new EventSource("/events");
+    es.onopen = () => {
+      setConn("live", "live");
+      retry = 1000;
+      if (opened) resync();   // catch up on anything missed while disconnected
+      opened = true;
+    };
+    es.addEventListener("change", (e) => { try { onChange(JSON.parse(e.data)); } catch (err) { /* ignore */ } });
+    es.addEventListener("resync", resync);
+    es.onerror = () => {
+      es.close();
+      setConn("down", "reconnecting");
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 10000);
+    };
+  }
+
+  setInterval(() => {   // keep relative times fresh
+    if (S.trees.length) renderList();
+    if (S.entry) renderHeader();
+  }, 15000);
+
+  loadList().then(selectFromHash);
+  connect();
+})();
+</script>
+</body>
+</html>

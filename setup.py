@@ -8,6 +8,7 @@ setup(
     name='draversal',
     version='0.2.0',
     packages=find_packages(),
+    package_data={'draversal_ui': ['index.html']},
     author='Marko T. Manninen',
     author_email='elonmedia@gmail.com',
     description='A package for depth-first traversal of Python dictionaries with uniform child fields, supporting both forward and backward navigation.',
@@ -27,6 +28,7 @@ setup(
         'console_scripts': [
             'draversal-mcp=draversal_mcp.server:main',
             'draversal-store=draversal_mcp.cli:main',
+            'draversal-ui=draversal_ui.server:main',
         ],
     },
 )
