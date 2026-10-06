@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 try:
@@ -12,6 +13,15 @@ except ImportError as exc:  # pragma: no cover - only raised when MCP is missing
 from . import tools
 
 mcp = FastMCP("draversal")
+
+# Tool definitions are sent to the model with every request, so by default only a
+# compact core set is exposed. DRAVERSAL_MCP_TOOLS=all also exposes the older
+# fine-grained tools, which the core tools cover.
+TOOLSET = os.environ.get("DRAVERSAL_MCP_TOOLS", "core").strip().lower()
+
+
+def _legacy_tool(fn):
+    return mcp.tool()(fn) if TOOLSET == "all" else fn
 
 
 @mcp.tool()
@@ -36,7 +46,7 @@ def visualize_tree(
     )
 
 
-@mcp.tool()
+@_legacy_tool
 def traversal_search(
     tree_id: str,
     query: str,
@@ -52,7 +62,7 @@ def traversal_search(
     )
 
 
-@mcp.tool()
+@_legacy_tool
 def traversal_find_paths(
     tree_id: str,
     titles: List[str] | str,
@@ -64,7 +74,7 @@ def traversal_find_paths(
     )
 
 
-@mcp.tool()
+@_legacy_tool
 def dict_search(
     tree_id: str,
     query: Dict[str, Any],
@@ -88,13 +98,13 @@ def dict_search(
     )
 
 
-@mcp.tool()
+@_legacy_tool
 def get_item_by_path(tree_id: str, path: List[int]) -> Dict[str, Any]:
     """Return the item at the given path."""
     return tools.get_item_by_path(tree_id, path)
 
 
-@mcp.tool()
+@_legacy_tool
 def children(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -104,7 +114,7 @@ def children(
     return tools.children(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def count_children(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -114,13 +124,13 @@ def count_children(
     return tools.count_children(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def max_depth(tree_id: str, path: Optional[List[int]] = None) -> int:
     """Return the maximum depth for the given path."""
     return tools.max_depth(tree_id, path=path)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_last_item(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -130,7 +140,7 @@ def get_last_item(
     return tools.get_last_item(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_last_path(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -140,7 +150,7 @@ def get_last_path(
     return tools.get_last_path(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_last_item_and_path(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -150,7 +160,7 @@ def get_last_item_and_path(
     return tools.get_last_item_and_path(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_next_item_and_path(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -160,7 +170,7 @@ def get_next_item_and_path(
     return tools.get_next_item_and_path(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_previous_item_and_path(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -170,19 +180,19 @@ def get_previous_item_and_path(
     return tools.get_previous_item_and_path(tree_id, path=path, sibling_only=sibling_only)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_parent_item(tree_id: str, path: Optional[List[int]] = None) -> Any:
     """Return the parent item for the given path."""
     return tools.get_parent_item(tree_id, path=path)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_parent_path(tree_id: str, path: Optional[List[int]] = None) -> List[int]:
     """Return the parent path for the given path."""
     return tools.get_parent_path(tree_id, path=path)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_parent_item_and_path(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -192,7 +202,7 @@ def get_parent_item_and_path(
     return tools.get_parent_item_and_path(tree_id, path=path, with_children=with_children)
 
 
-@mcp.tool()
+@_legacy_tool
 def peek_next(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -202,7 +212,7 @@ def peek_next(
     return tools.peek_next(tree_id, path=path, steps=steps)
 
 
-@mcp.tool()
+@_legacy_tool
 def peek_prev(
     tree_id: str,
     path: Optional[List[int]] = None,
@@ -212,13 +222,13 @@ def peek_prev(
     return tools.peek_prev(tree_id, path=path, steps=steps)
 
 
-@mcp.tool()
+@_legacy_tool
 def add_child(tree_id: str, path: List[int], item: Dict[str, Any]) -> Dict[str, Any]:
     """Add a child to the item at the given path."""
     return tools.add_child(tree_id, path, item)
 
 
-@mcp.tool()
+@_legacy_tool
 def insert_child(
     tree_id: str,
     path: List[int],
@@ -229,13 +239,13 @@ def insert_child(
     return tools.insert_child(tree_id, path, index, item)
 
 
-@mcp.tool()
+@_legacy_tool
 def replace_child(tree_id: str, path: List[int], item: Dict[str, Any]) -> Dict[str, Any]:
     """Replace the child at the given path."""
     return tools.replace_child(tree_id, path, item)
 
 
-@mcp.tool()
+@_legacy_tool
 def modify_item(
     tree_id: str,
     path: List[int],
@@ -247,13 +257,13 @@ def modify_item(
     return tools.modify_item(tree_id, path, key=key, value=value, changes=changes)
 
 
-@mcp.tool()
+@_legacy_tool
 def delete_child(tree_id: str, path: List[int]) -> Dict[str, Any]:
     """Delete the child at the given path."""
     return tools.delete_child(tree_id, path)
 
 
-@mcp.tool()
+@_legacy_tool
 def get_cursor(tree_id: str) -> List[int]:
     """Return the stored cursor path for the tree."""
     return tools.get_cursor(tree_id)
@@ -271,12 +281,14 @@ def next_item(
     sibling_only: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
-    include_children: bool = False,
+    depth: int = 0,
+    peek: bool = False,
 ) -> Dict[str, Any]:
-    """Advance the stored cursor and return the next item (without children), its path and child_count.
+    """Move the cursor forward and return {item, path, child_count}.
 
     where: skip items not matching this query on their own fields, e.g. {"status$ne": "done"}.
-    update_current: fields to set on the item under the cursor before moving, e.g. {"status": "done"}.
+    update_current: fields to set on the current item before moving, e.g. {"status": "done"}.
+    depth: 0 item fields, 1 with direct children, -1 whole subtree. peek: do not move.
     If nothing matches, item is null and the cursor stays.
     """
     return tools.next_item(
@@ -284,7 +296,8 @@ def next_item(
         sibling_only=sibling_only,
         where=where,
         update_current=update_current,
-        include_children=include_children,
+        depth=depth,
+        peek=peek,
     )
 
 
@@ -294,15 +307,52 @@ def prev_item(
     sibling_only: bool = False,
     where: Optional[Dict[str, Any]] = None,
     update_current: Optional[Dict[str, Any]] = None,
-    include_children: bool = False,
+    depth: int = 0,
+    peek: bool = False,
 ) -> Dict[str, Any]:
-    """Move the stored cursor back; same options and response as next_item."""
+    """Move the cursor back; same options and response as next_item."""
     return tools.prev_item(
         tree_id,
         sibling_only=sibling_only,
         where=where,
         update_current=update_current,
-        include_children=include_children,
+        depth=depth,
+        peek=peek,
+    )
+
+
+@mcp.tool()
+def get_item(tree_id: str, path: Optional[List[int]] = None, depth: int = 0) -> Dict[str, Any]:
+    """Return {item, path, child_count} at path, or at the cursor if path is omitted. depth as in next_item."""
+    return tools.get_item(tree_id, path=path, depth=depth)
+
+
+@mcp.tool()
+def search(
+    tree_id: str,
+    text: Optional[str] = None,
+    regex: bool = False,
+    ignore_case: bool = True,
+    titles: Optional[List[str]] = None,
+    where: Optional[Dict[str, Any]] = None,
+    path: Optional[List[int]] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Find items; returns {matches: [{item, path}], total}.
+
+    text: label substring (regex if regex=true). titles: label chain from the root, e.g. ["Project", "Task"].
+    where: query on item fields, e.g. {"status": "todo", "priority$ge": 3}; combinable with text.
+    path: search under this item only.
+    """
+    return tools.search(
+        tree_id,
+        text=text,
+        regex=regex,
+        ignore_case=ignore_case,
+        titles=titles,
+        where=where,
+        path=path,
+        limit=limit,
     )
 
 
@@ -316,7 +366,7 @@ def save_tree(
     schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist a tree for later access by tree_id."""
-    return tools.save_tree(
+    saved = tools.save_tree(
         data,
         children_field,
         label_field=label_field,
@@ -324,11 +374,13 @@ def save_tree(
         validate=validate,
         schema=schema,
     )
+    # The caller already has the schema, no need to echo it back
+    return {k: v for k, v in saved.items() if k != "schema"}
 
 
 @mcp.tool()
-def get_tree(tree_id: str, include_data: bool = True) -> Dict[str, Any]:
-    """Fetch a persisted tree by id."""
+def get_tree(tree_id: str, include_data: bool = False) -> Dict[str, Any]:
+    """Fetch tree metadata (count, top_labels, cursor_path, schema); include_data=true adds the whole tree."""
     return tools.get_tree(tree_id, include_data=include_data)
 
 
@@ -346,8 +398,41 @@ def delete_tree(tree_id: str) -> Dict[str, Any]:
 
 @mcp.tool()
 def apply_tree_ops(tree_id: str, ops: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Apply modifications to a stored tree and persist the result."""
+    """Edit a tree in one call; ops run in order and are saved together.
+
+    ops items: {"op": "add_child", "path": parent, "item": {...}},
+    {"op": "insert_child", "path": parent, "index": i, "item": {...}},
+    {"op": "modify", "path": p, "changes": {...}}, {"op": "replace_child", "path": p, "item": {...}},
+    {"op": "delete_child", "path": p}. The cursor follows inserts and deletes.
+    """
     return tools.apply_tree_ops(tree_id, ops)
+
+
+def _compact_schema(node: Any) -> Any:
+    # Drop generated "title" entries and turn optional anyOf [X, null] into X;
+    # argument validation uses the function signature, not this advertised schema.
+    if isinstance(node, dict):
+        any_of = node.get("anyOf")
+        if isinstance(any_of, list) and len(any_of) == 2 and {"type": "null"} in any_of:
+            other = next(option for option in any_of if option != {"type": "null"})
+            node = {**{k: v for k, v in node.items() if k != "anyOf"}, **other}
+        return {
+            k: _compact_schema(v) for k, v in node.items()
+            if not (k == "title" and isinstance(v, str))
+        }
+    if isinstance(node, list):
+        return [_compact_schema(item) for item in node]
+    return node
+
+
+def _compact_tool_schemas() -> None:
+    # Smaller tool definitions mean fewer tokens in every model request
+    for tool in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
+        if isinstance(getattr(tool, "parameters", None), dict):
+            tool.parameters = _compact_schema(tool.parameters)
+
+
+_compact_tool_schemas()
 
 
 def main() -> None:

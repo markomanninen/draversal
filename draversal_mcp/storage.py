@@ -175,9 +175,18 @@ def save_tree(
     tree_id: Optional[str] = None,
     schema: Optional[Dict[str, Any]] = None,
     store_path: Optional[Path] = None,
+    existing: Optional[Dict[str, Any]] = None,
+    cursor_path: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
+    """
+    Save a tree entry.
+
+    `existing` is an already loaded entry of the same tree, which saves parsing
+    the tree file again. `cursor_path` overrides the stored cursor.
+    """
     path = store_path or _default_store_path()
     now = _utc_now()
+    new_cursor = cursor_path
 
     if _is_dir_store(path):
         if tree_id is None:
@@ -185,15 +194,18 @@ def save_tree(
             created_at = now
             cursor_path = []
         else:
-            try:
-                existing = _load_tree_entry(path, tree_id)
-            except KeyError:
-                existing = None
+            if existing is None:
+                try:
+                    existing = _load_tree_entry(path, tree_id)
+                except KeyError:
+                    existing = None
             created_at = existing.get("created_at", now) if existing else now
             cursor_path = _read_cursor(path, tree_id, existing) if existing else []
             if schema is None and existing:
                 schema = existing.get("schema")
 
+        if new_cursor is not None:
+            cursor_path = new_cursor
         count = _count_nodes(data, children_field)
         top_labels = _top_labels(data, children_field, label_field)
         entry = {
@@ -231,6 +243,8 @@ def save_tree(
         cursor_path = existing.get("cursor_path", []) if existing else []
         if schema is None and existing:
             schema = existing.get("schema")
+    if new_cursor is not None:
+        cursor_path = new_cursor
 
     count = _count_nodes(data, children_field)
     top_labels = _top_labels(data, children_field, label_field)

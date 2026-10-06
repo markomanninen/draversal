@@ -79,48 +79,70 @@ Restart clients after updating config files.
 
 ## Tools
 
-- `validate_tree`: Validate nested structures by `tree_id` and return `{valid: bool, error?: str}`.
-- `visualize_tree`: Render a text tree representation by `tree_id`, optionally from root or
-  with a highlighted `current_path`.
-- `traversal_search`: Search the tree by label using a string or regex.
-- `traversal_find_paths`: Locate paths for ordered titles.
-- `dict_search`: Run `DictSearchQuery` and return matching fields, with optional
-  reconstructed items.
-- `get_item_by_path`: Fetch an item at a given path.
-- `children`: List children for a given path.
-- `count_children`: Count children for a given path.
-- `max_depth`: Return max depth for a given path.
-- `get_last_item`: Fetch the last item under a given path.
-- `get_last_path`: Fetch the last path under a given path.
-- `get_last_item_and_path`: Fetch the last item and its path.
-- `get_next_item_and_path`: Fetch the next item and its path.
-- `get_previous_item_and_path`: Fetch the previous item and its path.
-- `get_parent_item`: Fetch the parent item for a path.
-- `get_parent_path`: Fetch the parent path for a path.
-- `get_parent_item_and_path`: Fetch the parent item and its path.
-- `peek_next`: Peek at the next item without advancing.
-- `peek_prev`: Peek at the previous item without advancing.
-- `add_child`: Add a child to a path.
-- `insert_child`: Insert a child at an index.
-- `replace_child`: Replace a child at a path.
-- `modify_item`: Modify fields at a path.
-- `delete_child`: Delete a child at a path.
-- `get_cursor`: Get the stored cursor path.
-- `set_cursor`: Set the stored cursor path.
-- `next_item`: Advance the cursor and return the next item (without children),
-  its path and `child_count`. Options:
-  - `where`: skip items whose own fields do not match a `DictSearchQuery` style
-    query, e.g. `{"status$ne": "done"}` jumps straight to the next open task.
-    If nothing matches, `item` is `null` and the cursor does not move.
-  - `update_current`: fields to set on the item under the cursor before moving,
-    e.g. `{"status": "done"}`, so "complete and go to next" is a single call.
-  - `include_children`: return the item with its whole subtree.
-- `prev_item`: Move the cursor back; same options and response as `next_item`.
+Tool definitions are sent to the model with every request, so the server exposes
+a compact core set by default: 12 tools, about 1,300 tokens. Set
+`DRAVERSAL_MCP_TOOLS=all` to also expose the older fine-grained tools listed
+further below. That set has 35 tools and is about 3,200 tokens.
+
+### Core tools
+
 - `save_tree`: Persist a tree and return its `tree_id`.
-- `get_tree`: Retrieve a persisted tree by `tree_id`.
+- `get_tree`: Tree metadata (`count`, `top_labels`, `cursor_path`, `schema`);
+  `include_data=true` adds the whole tree.
 - `list_trees`: List stored trees (metadata only).
 - `delete_tree`: Remove a stored tree by `tree_id`.
-- `apply_tree_ops`: Apply modifications to a stored tree and persist the result.
+- `validate_tree`: Validate the whole tree and return `{valid: bool, error?: str}`.
+- `visualize_tree`: Render a text tree, optionally from the root or marking a path.
+- `next_item`: Advance the cursor and return `{item, path, child_count}`. The item
+  has its own fields only. Options:
+  - `where`: skip items whose own fields do not match a `DictSearchQuery` style
+    query, for example `{"status$ne": "done"}`, which jumps straight to the next open task.
+    If nothing matches, `item` is `null` and the cursor does not move.
+  - `update_current`: fields to set on the item under the cursor before moving,
+    for example `{"status": "done"}`, so "complete and go to next" is a single call.
+  - `depth`: `0` returns the item's own fields, `1` adds its direct children and `-1` returns the whole subtree.
+  - `peek`: return the item without moving the cursor.
+- `prev_item`: Move the cursor back. It takes the same options and returns the same response as `next_item`.
+- `set_cursor`: Set the cursor path.
+- `get_item`: `{item, path, child_count}` at a path, or at the cursor when `path`
+  is omitted; `depth` as above.
+- `search`: Returns `{matches: [{item, path}], total}`. Matched items do not include children.
+  - `text`: label substring, or a regular expression with `regex=true`.
+  - `titles`: an ordered chain of labels from the root, for example `["Project", "Task"]`.
+  - `where`: a query on item fields, for example `{"status": "todo", "priority$ge": 3}`.
+    It can be combined with `text`.
+  - `path`: search only under this item.
+  - `limit`: maximum number of matches; defaults to 50.
+- `apply_tree_ops`: Edit a tree in one call. Ops run in order and are saved together:
+  - `{"op": "add_child", "path": parent, "item": {...}}`
+  - `{"op": "insert_child", "path": parent, "index": i, "item": {...}}`
+  - `{"op": "modify", "path": p, "changes": {...}}`
+  - `{"op": "replace_child", "path": p, "item": {...}}`
+  - `{"op": "delete_child", "path": p}`
+
+Paths are lists of child indices from the root; negative indices count from the end.
+
+Writes validate only the items they change. Added and replaced items are
+validated together with their new subtrees. Write responses contain only
+`tree_id`, `updated_at`, `count` and `cursor_path`.
+
+The stored cursor follows edits:
+- An insert or delete before the cursor shifts its index.
+- Deleting the cursor's own item moves the cursor to the preceding item, so `next_item`
+  continues from the item that took its place.
+- Replacing an ancestor of the cursor moves the cursor to the replaced item.
+
+### Additional tools (`DRAVERSAL_MCP_TOOLS=all`)
+
+- `traversal_search`, `traversal_find_paths`, `dict_search`: older search variants, covered by `search`.
+- `get_item_by_path`, `children`, `count_children`, `max_depth`: covered by `get_item`.
+- `get_last_item`, `get_last_path`, `get_last_item_and_path`, `get_parent_item`,
+  `get_parent_path`, `get_parent_item_and_path`, `get_next_item_and_path`,
+  `get_previous_item_and_path`: path helpers for an explicit path, without the stored cursor.
+- `peek_next`, `peek_prev`: covered by `next_item`/`prev_item` with `peek=true`.
+- `add_child`, `insert_child`, `replace_child`, `modify_item`, `delete_child`:
+  single-operation versions of `apply_tree_ops`.
+- `get_cursor`: covered by `get_item` and `get_tree`.
 
 All traversal/query tools operate on a stored tree by `tree_id`. Use `save_tree`
 to create the tree first, then reference the id for subsequent calls.

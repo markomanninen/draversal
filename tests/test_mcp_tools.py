@@ -279,8 +279,11 @@ class TestMcpCursorEconomy(unittest.TestCase):
         self.assertEqual(result, {"item": {"title": "P1", "status": "done"}, "path": [0], "child_count": 2})
         self.assertEqual(tools.get_cursor(self.tree_id), [0])
         tools.set_cursor(self.tree_id, [])
-        full = tools.next_item(self.tree_id, include_children=True)
+        full = tools.next_item(self.tree_id, depth=-1)
         self.assertEqual(len(full["item"]["tasks"]), 2)
+        tools.set_cursor(self.tree_id, [])
+        shallow = tools.next_item(self.tree_id, depth=1)
+        self.assertEqual(shallow["item"]["tasks"], [{"title": "T1", "status": "done"}, {"title": "T2", "status": "todo"}])
 
     def test_next_item_where_skips_non_matching_items(self):
         where = {"status$ne": "done"}
@@ -338,3 +341,123 @@ class TestMcpCursorEconomy(unittest.TestCase):
         self.assertFalse(cursor_file.exists())
         with self.assertRaises(KeyError):
             tools.set_cursor(self.tree_id, [])
+
+
+class TestMcpCoreTools(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        self.schema = {
+            "required": ["title", "status"],
+            "properties": {"title": {"type": "string"}, "status": {"enum": ["todo", "done"]}},
+        }
+        data = {"title": "All", "status": "todo", "tasks": [
+            {"title": "A", "status": "todo", "tasks": [
+                {"title": "A1", "status": "done"},
+                {"title": "A2", "status": "todo"},
+            ]},
+            {"title": "B", "status": "todo"},
+            {"title": "C", "status": "done"},
+        ]}
+        self.tree_id = tools.save_tree(data, "tasks", "title", schema=self.schema)["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def _cursor_after(self, cursor, ops):
+        tools.set_cursor(self.tree_id, cursor)
+        result = tools.apply_tree_ops(self.tree_id, ops)
+        self.assertEqual(result["cursor_path"], tools.get_cursor(self.tree_id))
+        return result["cursor_path"]
+
+    # Cursor follows edits
+
+    def test_cursor_shifts_on_insert_before_it(self):
+        self.assertEqual(self._cursor_after([1], [{"op": "insert_child", "path": [], "index": 0, "item": {"title": "X", "status": "todo"}}]), [2])
+        self.assertEqual(tools.get_item(self.tree_id)["item"]["title"], "B")
+        # A is now at [1]; a negative index counts from the end of its children
+        self.assertEqual(self._cursor_after([1, 1], [{"op": "insert_child", "path": [1], "index": -1, "item": {"title": "Y", "status": "todo"}}]), [1, 2])
+
+    def test_cursor_unchanged_on_append_and_later_insert(self):
+        self.assertEqual(self._cursor_after([1], [{"op": "add_child", "path": [], "item": {"title": "X", "status": "todo"}}]), [1])
+        self.assertEqual(self._cursor_after([1], [{"op": "insert_child", "path": [], "index": 2, "item": {"title": "Y", "status": "todo"}}]), [1])
+
+    def test_cursor_shifts_on_delete_before_it(self):
+        self.assertEqual(self._cursor_after([2], [{"op": "delete_child", "path": [0]}]), [1])
+        self.assertEqual(tools.get_item(self.tree_id)["item"]["title"], "C")
+
+    def test_cursor_moves_to_previous_item_when_its_item_is_deleted(self):
+        self.assertEqual(self._cursor_after([1], [{"op": "delete_child", "path": [1]}]), [0, 1])
+        self.assertEqual(tools.next_item(self.tree_id)["item"]["title"], "C")
+        self.assertEqual(self._cursor_after([0, 1], [{"op": "delete_child", "path": [0]}]), [])
+        # Only C is left; deleting it with a negative index moves the cursor to the root
+        self.assertEqual(self._cursor_after([0], [{"op": "delete_child", "path": [-1]}]), [])
+
+    def test_cursor_falls_back_to_replaced_item(self):
+        self.assertEqual(self._cursor_after([0, 1], [{"op": "replace_child", "path": [0], "item": {"title": "A", "status": "todo"}}]), [0])
+
+    # Writes validate changed items and return small responses
+
+    def test_changed_items_are_validated(self):
+        with self.assertRaises(ValueError):
+            tools.modify_item(self.tree_id, [0, 1], key="status", value="maybe")
+        with self.assertRaises(ValueError):
+            tools.add_child(self.tree_id, [1], {"title": "X"})
+        with self.assertRaises(ValueError):
+            tools.add_child(self.tree_id, [1], {"title": "X", "status": "todo", "tasks": [{"title": "Y", "status": "?"}]})
+        self.assertEqual(tools.get_item(self.tree_id, [0, 1])["item"]["status"], "todo")
+
+    def test_write_response_is_small(self):
+        result = tools.modify_item(self.tree_id, [1], key="status", value="done")
+        self.assertEqual(set(result), {"tree_id", "updated_at", "count", "cursor_path"})
+
+    # get_item, peek and search
+
+    def test_get_item_at_cursor_and_depth(self):
+        tools.set_cursor(self.tree_id, [0])
+        self.assertEqual(tools.get_item(self.tree_id), {"item": {"title": "A", "status": "todo"}, "path": [0], "child_count": 2})
+        self.assertEqual(len(tools.get_item(self.tree_id, [], depth=1)["item"]["tasks"]), 3)
+
+    def test_peek_does_not_move(self):
+        self.assertEqual(tools.next_item(self.tree_id, peek=True)["path"], [0])
+        self.assertEqual(tools.prev_item(self.tree_id, peek=True, where={"status": "done"})["path"], [2])
+        self.assertEqual(tools.get_cursor(self.tree_id), [])
+        with self.assertRaises(ValueError):
+            tools.next_item(self.tree_id, peek=True, update_current={"status": "done"})
+
+    def test_search_modes(self):
+        paths = lambda result: [match["path"] for match in result["matches"]]
+        self.assertEqual(paths(tools.search(self.tree_id, text="a")), [[0], [0, 0], [0, 1]])
+        self.assertEqual(paths(tools.search(self.tree_id, text="^A\\d$", regex=True)), [[0, 0], [0, 1]])
+        self.assertEqual(paths(tools.search(self.tree_id, where={"status": "done"})), [[0, 0], [2]])
+        self.assertEqual(paths(tools.search(self.tree_id, where={"status": "todo"}, text="A")), [[0], [0, 1]])
+        self.assertEqual(paths(tools.search(self.tree_id, titles=["A", "A2"])), [[0, 1]])
+        self.assertEqual(paths(tools.search(self.tree_id, text="A", path=[0])), [[0, 0], [0, 1]])
+        limited = tools.search(self.tree_id, text="a", limit=1)
+        self.assertEqual((len(limited["matches"]), limited["total"]), (1, 3))
+        self.assertNotIn("tasks", tools.search(self.tree_id, text="A")["matches"][0]["item"])
+        with self.assertRaises(ValueError):
+            tools.search(self.tree_id)
+
+
+class TestMcpServerToolset(unittest.TestCase):
+    def test_core_toolset_and_compact_schemas(self):
+        try:
+            from draversal_mcp import server
+        except RuntimeError:
+            self.skipTest("mcp is not installed")
+        import asyncio
+        listed = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
+        if server.TOOLSET != "all":
+            self.assertEqual(set(listed), {
+                "validate_tree", "visualize_tree", "set_cursor", "next_item", "prev_item", "get_item",
+                "search", "save_tree", "get_tree", "list_trees", "delete_tree", "apply_tree_ops",
+            })
+        schema = json.dumps(listed["next_item"].inputSchema)
+        self.assertNotIn('"title"', schema)
+        self.assertNotIn("anyOf", schema)

@@ -94,51 +94,71 @@ object tree are slower, because an MCP call always starts from JSON.
 
 The task trees had projects, tasks and subtasks, with status, assignee,
 priority and tags, validated against `samples/schema_task_list.json`.
-Times are milliseconds per call.
+Times are milliseconds per call. *Before* is the 0.1.7 state, *after* is the
+state after both optimization rounds.
 
 | Call | 1,220 nodes, before | after | 11,050 nodes, before | after |
 |---|---:|---:|---:|---:|
-| `next_item` | 12–20 | 2.2 | 74–132 | 8.8 |
+| `next_item` | 12–20 | 2.5 | 74–132 | 9.8 |
 | `next_item` response, moving onto a project | 6,848 chars | 144 | 24,735 chars | 144 |
-| `modify_item` | 47 | 48 | 386 | 397 |
+| `modify_item` | 47 | 9.1 | 386 | 63 |
+| `modify_item` response | 852 chars | 123 | 1,064 chars | 125 |
+| complete current item and go to the next open one | 2+ calls | 1 call, 11 ms | 2+ calls | 1 call, 64 ms |
+| tool definitions sent with every model request | ~3,500 tokens (33 tools) | ~1,300 tokens (12 tools) | | |
 
-The traversal step itself takes 0.002 ms. The remaining cost is storage,
-validation and response size.
+The traversal step itself takes 0.002 ms. Storage, validation and response
+size are the real cost.
 
 ### What was changed
 
 1. **`next_item`/`prev_item` return the item without children**, plus `child_count`.
-   Pass `include_children=True` to get the whole subtree.
+   `depth` (0, 1 or -1) asks for more. `peek` returns the item without moving the cursor.
 2. **`where`** jumps straight to the next matching item, for example
-   `{"status$ne": "done"}`. Before, at 50 % done, it took about 2 `next_item`
-   calls per open task, and more as the list got closer to done.
-3. **`update_current`** sets fields on the current item and then moves, so
-   "complete and go to next" is one call instead of two.
-4. **The cursor is stored in a side file** in the directory store. Before, a
+   `{"status$ne": "done"}`. **`update_current`** sets fields on the current item and
+   then moves, so "complete and go to next" is one call.
+3. **The cursor is stored in a side file** in the directory store. Before, a
    single cursor move parsed the tree file three times and rewrote the whole tree.
    Now the tree is read once and only a few bytes are written.
-5. **Root-level modifications persist.** Before, `modify_item` at path `[]` and
-   `add_child` on a root without a children list were silently lost.
-6. **`mcp` is pinned to `<2`**, because the 2.x SDK removed `FastMCP` and fresh
-   installs did not start.
+4. **Writes validate only changed items.** The schema applies to every item on
+   its own, so whole-tree validation (324 ms on 11k nodes) is not needed.
+   Added and replaced items are validated with their new subtree. The compiled
+   JSON Schema validator is cached. Saving reuses the already loaded entry
+   instead of parsing the tree file again.
+5. **Write responses are small**: only `tree_id`, `updated_at`, `count` and
+   `cursor_path`. Before, they echoed the schema and the top-level labels.
+6. **The cursor follows edits.** Inserts and deletes before the cursor shift its
+   index. Deleting the cursor's own item moves the cursor to the preceding item,
+   and replacing an ancestor moves it to the replaced item.
+7. **The default MCP tool set has 12 core tools.** `get_item` and `search` replace
+   the many path and search helpers, and `apply_tree_ops` covers single edits.
+   Generated `title` and `anyOf null` entries are removed from the advertised
+   schemas. Together this takes the tool definitions from about 3,500 to about
+   1,300 tokens. `DRAVERSAL_MCP_TOOLS=all` keeps the older tools available.
+8. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
+   because the 2.x SDK removed `FastMCP`.
+
+### Design principle: free-form fields
+
+Items can hold any fields, so priorities, assignees, due dates, tags or
+dependencies need no special support. They are ordinary fields that `where`
+and `search` can filter on, for example `{"priority$ge": 3}`. Dedicated fields
+and operations are only needed when changing one item requires updating
+others. Examples:
+- references by **path**, which shift on inserts and deletes. Use a stable
+  `id` field for references instead; then the tree never needs rewriting.
+- stored rollups, such as a parent marked done when all its children are done,
+  or progress percentages. Compute these on read rather than storing them.
 
 ### Remaining opportunities
 
-- **Validate only the changed item.** Any write currently runs JSON Schema over
-  the whole tree: 324 ms of the 397 ms `modify_item` on 11k nodes, and most of the
-  505 ms that `next_item(update_current=...)` takes. The schema applies to each
-  item independently, so validating the changed item is enough.
-- **Cut down the tool count.** There are 33 tools, about 3,700 tokens of
-  definitions that are sent with every LLM request. Many overlap:
-  - `get_last_item` / `get_last_path` / `get_last_item_and_path`
-  - the parent and next/previous variants
-  - `get_next_item_and_path` versus `peek_next`
-
-  Merging them into about 10 tools would bring the definitions to roughly
-  1,000 tokens.
-- **Leave the schema out of mutation responses.** Every save currently returns
-  the full schema (521 characters for the task list schema).
-- **Shift the cursor on edits.** Inserting or deleting an item before the
-  cursor does not adjust `cursor_path`, so it ends up pointing at a different item.
-- **Add Taskmaster-like readiness.** Optional `depends_on` and `priority`
-  conventions could be used by `next_item(where=...)` ordering, without new tools.
+- **Writing the tree file.** On an 11k-node tree most of the remaining 63 ms of a
+  write is `json.dumps(indent=2)` (about 48 ms) of the whole 2.9 MB file. Compact
+  JSON, or one file per subtree, would cut that. The trade-off is less readable
+  store files.
+- **`visualize_tree` output** is the whole tree (240k characters on 11k nodes). A
+  `max_depth` or subtree limit would keep it usable for large lists.
+- **Ordering by field.** `where` filters, but the cursor always follows tree
+  order. An optional `order_by` for `search` would allow "highest priority
+  first" without new fields.
+- **The legacy single-file store** (`trees.json`) still rewrites the whole store
+  when the cursor moves.
