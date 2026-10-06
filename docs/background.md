@@ -289,6 +289,17 @@ agent ran non-interactively (`claude -p`, `codex exec`) with its own named curso
 - `get_item` gained `counts` and `counts_where`, so rollups are computed on read
   rather than kept by agents. This matches the free-form field principle above.
 
+**Test 3: the same 4 agents and the same 3-level tree, with the new operations.**
+- Protocol: 2 calls per subtask. Claim with `next_item(update_found=...)`, then one
+  `apply_tree_ops` that completes the subtask with `if_hash` and runs `increment` and
+  `append` on the root.
+- There were no parent counters to keep: progress came from `get_item(counts=...)`.
+- Result:
+  - 18/18 subtasks were done, each with a note and an owner.
+  - The root counter was 18 and the log had 18 entries that matched the owners exactly.
+  - There were 0 conflicts, and all 4 agents, including `gpt-6-luna`, followed the protocol.
+  - The test took 35 s. Test 2 took about 1.5 min.
+
 ## MCP SDK 2.x
 
 Assessed on 2026-10-07 against the
