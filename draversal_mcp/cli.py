@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -149,9 +150,36 @@ def main() -> None:
 
     subparsers.add_parser("validate", help="Validate the tree store.")
     subparsers.add_parser("prune", help="Remove corrupted entries.")
+    subparsers.add_parser("where", help="Show which store is used here and why.")
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Create a repository-local store in .draversal/trees/ with a .gitignore.",
+    )
+    init_parser.add_argument("--path", help="Project root (default: current directory).")
+    init_parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Write compact JSON instead of indented JSON (smaller, but noisy git diffs).",
+    )
 
     args = parser.parse_args()
+
+    if args.command == "init":
+        root = Path(args.path).expanduser() if args.path else None
+        _print_json(storage.init_project_store(root, indent=None if args.compact else 2))
+        return
+
     store_path = _resolve_store_path(args.store_path)
+
+    if args.command == "where":
+        if args.store_path or os.getenv(storage.STORE_ENV_VAR):
+            source = "--store-path" if args.store_path else storage.STORE_ENV_VAR
+        elif storage.find_project_store() is not None:
+            source = "project (.draversal/trees/ found from the working directory upwards)"
+        else:
+            source = "global default"
+        _print_json({"store_path": str(store_path), "source": source})
+        return
 
     if args.command == "list":
         payload = storage.list_trees(limit=args.limit, store_path=store_path)

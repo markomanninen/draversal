@@ -87,3 +87,27 @@ class TestStoreCli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStoreCliInit(unittest.TestCase):
+    def test_init_and_where(self):
+        with tempfile.TemporaryDirectory() as temp:
+            original = os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+            cwd = os.getcwd()
+            try:
+                buf = io.StringIO()
+                with mock.patch.object(sys, "argv", ["draversal-store", "init", "--path", temp]):
+                    with redirect_stdout(buf):
+                        cli.main()
+                self.assertTrue((Path(temp) / ".draversal" / "trees" / "store.config").exists())
+                os.chdir(temp)
+                buf = io.StringIO()
+                with mock.patch.object(sys, "argv", ["draversal-store", "where"]):
+                    with redirect_stdout(buf):
+                        cli.main()
+                report = json.loads(buf.getvalue())
+                self.assertTrue(report["source"].startswith("project"))
+            finally:
+                os.chdir(cwd)
+                if original is not None:
+                    os.environ["DRAVERSAL_MCP_STORE_PATH"] = original

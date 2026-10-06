@@ -193,6 +193,44 @@ rule "agents may only flip `passes`" becomes
 `policy={"editable_fields": ["passes"], "lock_structure": true}`. The policy is a
 guardrail against accidental edits by agents, not access control.
 
+### Dependencies
+
+Items can wait for other items through two ordinary fields:
+- `id`: a stable name for the item.
+- `depends_on`: one id or a list of ids.
+
+An item is **ready** when every id in its own `depends_on`, and in its ancestors',
+belongs to an item whose `status` is `done`. A subtask of a task that waits is
+therefore also waiting. An unfinished parent does not block its own children. Ids
+that match no item count as not done.
+
+- **`next_item(ready=true)`, `prev_item(ready=true)` and `search(ready=true)`** skip
+  items that are not ready.
+- **`blocked_by`.** Responses list the unfinished ids an item waits for.
+- **`blocked` and `wait`.** When nothing is ready, `next_item` returns `item: null` and
+  `blocked`, the number of matching items still waiting. Pass `wait` (seconds, at most 60)
+  to keep polling on the server until one becomes ready. The tree is not locked while it
+  waits.
+- **Validation.** `validate_tree` reports duplicate ids, references to unknown ids, and
+  dependency cycles.
+- **Field names.** They are per tree. For example,
+  `save_tree(..., dependencies={"id_field": "key", "depends_field": "after", "status_field": "state", "done_values": ["closed"]})`.
+
+Readiness is computed when it is read, so nothing extra is stored or kept in sync.
+
+### Instructions for agents
+
+The server sends a short usage text (about 200 tokens) when a session starts, and
+clients add it to the model's system prompt. It tells agents to:
+- claim with `update_found`
+- finish with one `apply_tree_ops` call that uses `if_hash`
+- use `increment`/`append` for shared counters and logs
+- wait with `ready`/`wait`
+- read progress with `counts`
+
+This way every agent learns the safe loop without it being repeated in prompts or in
+AGENTS.md/CLAUDE.md files.
+
 ### Additional tools (`DRAVERSAL_MCP_TOOLS=all`)
 
 - `traversal_search`, `traversal_find_paths`, `dict_search`: older search variants, covered by `search`.
@@ -214,6 +252,27 @@ Trees are stored on disk so any MCP client can recall them across sessions.
 If `~/.draversal/trees.json` exists, it is used as the legacy single-file store.
 Otherwise the default is the directory store at `~/.draversal/trees/` (one file per tree).
 Override with `DRAVERSAL_MCP_STORE_PATH` to point at either a file or a directory.
+**Repository-local store.** Run `draversal-store init` in a project. It creates
+`.draversal/trees/` with a `store.config` that asks for indented JSON, which gives
+readable diffs. It also creates a `.draversal/.gitignore` that keeps lock, temporary
+and cursor files out of git: cursors are each agent's position, not shared state.
+
+The server then finds the nearest `.draversal/trees/` from its working directory
+upwards, the way git finds a repository, so agents started in the project use the
+project's trees. The search stops below the home directory.
+
+The store is chosen in this order:
+1. `DRAVERSAL_MCP_STORE_PATH`
+2. a project store
+3. the legacy `~/.draversal/trees.json`
+4. `~/.draversal/trees/`
+
+`draversal-store where` shows which store applies and why. `draversal-store init --compact`
+keeps compact files.
+
+Each tree is one file, so two branches that change the same tree can conflict on
+merge. Indented JSON keeps such conflicts readable.
+
 In the directory store, the cursor of each tree is kept in a small side file
 (`<tree file>.cursor`), so moving the cursor does not rewrite the tree. Older
 entries that only have `cursor_path` inside the tree file are still read.

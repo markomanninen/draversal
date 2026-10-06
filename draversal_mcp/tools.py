@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import time
 import os
 import re
 from pathlib import Path
@@ -200,6 +201,9 @@ def validate_tree(tree_id: str) -> Dict[str, Any]:
         _validate_tree_schema(entry["data"], entry["children_field"], entry.get("schema"))
     except ValueError as exc:
         return {"valid": False, "error": str(exc)}
+    error = _validate_dependencies(entry)
+    if error:
+        return {"valid": False, "error": error}
     return {"valid": True}
 
 
@@ -494,6 +498,117 @@ def set_cursor(tree_id: str, path: List[int], cursor: Optional[str] = None) -> D
     return storage.set_cursor(tree_id, path, name=_cursor_name(cursor))
 
 
+DEFAULT_DEPENDENCIES = {
+    "id_field": "id",
+    "depends_field": "depends_on",
+    "status_field": "status",
+    "done_values": ["done"],
+}
+
+
+def _dependency_settings(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {**DEFAULT_DEPENDENCIES, **(entry.get("dependencies") or {})}
+
+
+def _normalize_dependencies(dependencies: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if dependencies is None:
+        return None
+    if not isinstance(dependencies, dict) or set(dependencies) - set(DEFAULT_DEPENDENCIES):
+        raise ValueError(f"dependencies must be an object with keys {sorted(DEFAULT_DEPENDENCIES)}.")
+    for key in ("id_field", "depends_field", "status_field"):
+        if key in dependencies and (not isinstance(dependencies[key], str) or not dependencies[key]):
+            raise ValueError(f"dependencies.{key} must be a field name.")
+    if "done_values" in dependencies and not isinstance(dependencies["done_values"], list):
+        raise ValueError("dependencies.done_values must be a list.")
+    return dependencies
+
+
+def _as_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    return list(value) if isinstance(value, list) else [value]
+
+
+class _Dependencies:
+    """
+    Readiness by dependencies, computed on read.
+
+    An item is ready when every id in its own depends_on, and in its ancestors',
+    belongs to an item whose status is done. Unknown ids count as not done.
+    """
+
+    def __init__(self, entry: Dict[str, Any]) -> None:
+        self.settings = _dependency_settings(entry)
+        self.children_field = entry["children_field"]
+        self.data = entry["data"]
+        self._done: Optional[set] = None
+
+    def _done_ids(self) -> set:
+        if self._done is None:
+            id_field, status_field = self.settings["id_field"], self.settings["status_field"]
+            done_values, done = self.settings["done_values"], set()
+            stack = [self.data]
+            while stack:
+                node = stack.pop()
+                stack.extend(node.get(self.children_field) or [])
+                if id_field in node and node.get(status_field) in done_values:
+                    done.add(str(node[id_field]))
+            self._done = done
+        return self._done
+
+    def blocked_by(self, path: List[int]) -> List[str]:
+        depends_field = self.settings["depends_field"]
+        node, wanted = self.data, _as_list(self.data.get(depends_field))
+        for index in path:
+            node = node[self.children_field][index]
+            wanted += _as_list(node.get(depends_field))
+        if not wanted:
+            return []
+        done = self._done_ids()
+        return [dep for dep in dict.fromkeys(str(d) for d in wanted) if dep not in done]
+
+
+def _validate_dependencies(entry: Dict[str, Any]) -> Optional[str]:
+    # Duplicate ids, references to unknown ids, and cycles make readiness meaningless
+    settings, children_field = _dependency_settings(entry), entry["children_field"]
+    id_field, depends_field = settings["id_field"], settings["depends_field"]
+    graph: Dict[str, List[str]] = {}
+    references = []
+    stack = [entry["data"]]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get(children_field) or [])
+        deps = [str(d) for d in _as_list(node.get(depends_field))]
+        if id_field in node:
+            key = str(node[id_field])
+            if key in graph:
+                return f"Duplicate {id_field} '{key}'."
+            graph[key] = deps
+        references.extend(deps)
+    unknown = sorted(set(references) - set(graph))
+    if unknown:
+        return f"Unknown {depends_field} reference(s): {unknown}."
+    state: Dict[str, int] = {}
+    for start in graph:
+        if state.get(start):
+            continue
+        path_stack = [(start, iter(graph[start]))]
+        state[start] = 1
+        while path_stack:
+            node, children = path_stack[-1]
+            nxt = next(children, None)
+            if nxt is None:
+                state[node] = 2
+                path_stack.pop()
+            elif state.get(nxt) == 1:
+                cycle = [n for n, _ in path_stack][[n for n, _ in path_stack].index(nxt):] + [nxt]
+                return f"Dependency cycle: {' -> '.join(cycle)}."
+            elif not state.get(nxt):
+                state[nxt] = 1
+                path_stack.append((nxt, iter(graph[nxt])))
+    return None
+
+
 def _shape_item(item: Dict[str, Any], children_field: str, depth: int) -> Dict[str, Any]:
     # depth 0: fields only, 1: with direct children (fields only), -1: whole subtree
     fields = {k: v for k, v in item.items() if k != children_field}
@@ -522,13 +637,22 @@ def _check_hash(item: Dict[str, Any], children_field: str, path: List[int], expe
         )
 
 
-def _item_response(item: Dict[str, Any], path: List[int], children_field: str, depth: int) -> Dict[str, Any]:
-    return {
+def _item_response(
+    item: Dict[str, Any],
+    path: List[int],
+    children_field: str,
+    depth: int,
+    blocked_by: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    response = {
         "item": _shape_item(item, children_field, depth),
         "path": path,
         "child_count": len(item.get(children_field) or []),
         "hash": _item_hash(item, children_field),
     }
+    if blocked_by:
+        response["blocked_by"] = blocked_by
+    return response
 
 
 def _move_cursor(
@@ -542,38 +666,56 @@ def _move_cursor(
     cursor: Optional[str] = None,
     update_found: Optional[Dict[str, Any]] = None,
     if_hash: Optional[str] = None,
+    ready: bool = False,
+    wait: float = 0,
 ) -> Dict[str, Any]:
     name = _cursor_name(cursor)
     if peek and (update_current or update_found):
         raise ValueError("update_current and update_found can not be used with peek.")
-    # The whole move is one locked step, so two agents can not claim the same item
-    with storage.tree_lock(tree_id):
-        # The tree is loaded once; only the small cursor file is written,
-        # unless the move also modifies items.
-        entry = _load_tree(tree_id)
-        children_field = entry["children_field"]
-        start = entry["cursors"].get(name, [])
-        if update_current:
-            _apply_ops(entry, tree_id, [{"op": "modify", "path": start, "changes": update_current, "if_hash": if_hash}])
-        traversal = DictTraversal(entry["data"], children_field=children_field)
-        traversal.set_path_as_current(start)
-        move = traversal.move_to_next_item if forward else traversal.move_to_prev_item
-        query = DictSearchQuery(where) if where else None
-        # Visit every item at most once, root included, before giving up
-        node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
-        for _ in range(node_count if query else 1):
-            move(sibling_only=skip_children)
-            item = traversal.current
-            if query is None or query.execute({k: v for k, v in item.items() if k != children_field}):
+    deadline = time.monotonic() + min(max(float(wait or 0), 0.0), 60.0)
+    first_attempt = True
+    while True:
+        # Each attempt is one locked step, so two agents can not claim the same item.
+        # Waiting happens outside the lock, so other agents can finish what blocks us.
+        with storage.tree_lock(tree_id):
+            entry = _load_tree(tree_id)
+            children_field = entry["children_field"]
+            start = entry["cursors"].get(name, [])
+            if first_attempt and update_current:
+                _apply_ops(entry, tree_id, [{"op": "modify", "path": start, "changes": update_current, "if_hash": if_hash}])
+            first_attempt = False
+            traversal = DictTraversal(entry["data"], children_field=children_field)
+            traversal.set_path_as_current(start)
+            move = traversal.move_to_next_item if forward else traversal.move_to_prev_item
+            query = DictSearchQuery(where) if where else None
+            dependencies = _Dependencies(entry)
+            blocked_matches = 0
+            # Visit every item at most once, root included, before giving up
+            node_count = entry.get("count") or storage._count_nodes(entry["data"], children_field)
+            for _ in range(node_count if (query or ready) else 1):
+                move(sibling_only=skip_children)
+                item = traversal.current
+                if query is not None and not query.execute({k: v for k, v in item.items() if k != children_field}):
+                    continue
                 found = traversal.path
+                blocked = dependencies.blocked_by(found)
+                if ready and blocked:
+                    blocked_matches += 1
+                    continue
                 if update_found:
                     _apply_ops(entry, tree_id, [{"op": "modify", "path": found, "changes": update_found}])
                     traversal = DictTraversal(entry["data"], children_field=children_field)
                     item = traversal.set_path_as_current(found).current
                 if not peek:
                     storage.set_cursor(tree_id, found, name=name)
-                return _item_response(item, found, children_field, depth)
-        return {"item": None, "path": start, "child_count": 0}
+                return _item_response(item, found, children_field, depth, blocked)
+            result = {"item": None, "path": start, "child_count": 0}
+            if ready:
+                # Matching items that wait for unfinished dependencies: retry later, or pass wait
+                result["blocked"] = blocked_matches
+        if not blocked_matches or time.monotonic() >= deadline:
+            return result
+        time.sleep(0.5)
 
 
 def next_item(
@@ -586,6 +728,8 @@ def next_item(
     cursor: Optional[str] = None,
     update_found: Optional[Dict[str, Any]] = None,
     if_hash: Optional[str] = None,
+    ready: bool = False,
+    wait: float = 0,
 ) -> Dict[str, Any]:
     """Advance the stored cursor and return the next item and path.
 
@@ -604,8 +748,13 @@ def next_item(
     `cursor` names an independent cursor, so several agents can browse the same tree.
     Responses include the item's `hash`; pass it as `if_hash` to make `update_current`
     fail with a conflict if another agent changed the item in between.
+    `ready` skips items that wait for dependencies: an item is ready when every id in its
+    own `depends_on` and in its ancestors' belongs to an item whose status is done (field
+    names are per tree, see save_tree `dependencies`). Responses list unfinished ones in
+    `blocked_by`. When nothing is ready, `blocked` counts the matching items still waiting;
+    `wait` (seconds, at most 60) keeps polling on the server until one becomes ready.
     """
-    return _move_cursor(tree_id, True, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash)
+    return _move_cursor(tree_id, True, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash, ready, wait)
 
 
 def prev_item(
@@ -618,13 +767,15 @@ def prev_item(
     cursor: Optional[str] = None,
     update_found: Optional[Dict[str, Any]] = None,
     if_hash: Optional[str] = None,
+    ready: bool = False,
+    wait: float = 0,
 ) -> Dict[str, Any]:
     """Move the stored cursor to the previous item and return it and its path.
 
     Accepts the same options as `next_item`; with `skip_children` it moves to the
     previous sibling without entering its subtree, or to the parent when there is none.
     """
-    return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash)
+    return _move_cursor(tree_id, False, skip_children, where, update_current, depth, peek, cursor, update_found, if_hash, ready, wait)
 
 
 def _count_values(
@@ -672,7 +823,8 @@ def get_item(
     path = entry["cursors"].get(_cursor_name(cursor), []) if path is None else path
     traversal = DictTraversal(entry["data"], children_field=children_field)
     traversal.set_path_as_current(path)
-    response = _item_response(traversal.current, traversal.path, children_field, depth)
+    blocked = _Dependencies(entry).blocked_by(traversal.path)
+    response = _item_response(traversal.current, traversal.path, children_field, depth, blocked)
     if counts:
         fields = [counts] if isinstance(counts, str) else list(counts)
         tallies = _count_values(traversal.current, children_field, fields, counts_where)
@@ -721,6 +873,7 @@ def search(
     path: Optional[List[int]] = None,
     limit: int = 50,
     order_by: Optional[List[str] | str] = None,
+    ready: bool = False,
 ) -> Dict[str, Any]:
     """Search items and return them without children, with absolute paths.
 
@@ -729,6 +882,8 @@ def search(
     - `where`: DictSearchQuery style query against each item's own fields, e.g. {"status": "todo"}.
       Can be combined with `text`.
     - `path`: search only under this item. At most `limit` matches are returned; `total` tells all.
+    - `ready`: only items whose dependencies are done (see next_item); otherwise matches
+      that wait for unfinished dependencies list them in `blocked_by`.
     - `order_by`: item field name or list of names to sort by before the limit is applied,
       "-" prefix for descending, e.g. ["-priority", "due"]. Items without the field come last;
       otherwise matches are in tree order.
@@ -760,10 +915,16 @@ def search(
                 if label_field in item and pattern.search(str(item[label_field]))
             ]
     children_field = entry["children_field"]
-    matches = [
-        {"item": item, "path": base + item_path, "hash": _item_hash(item, children_field)}
-        for item, item_path in results
-    ]
+    dependencies = _Dependencies(entry)
+    matches = []
+    for item, item_path in results:
+        match = {"item": item, "path": base + item_path, "hash": _item_hash(item, children_field)}
+        blocked = dependencies.blocked_by(base + item_path)
+        if blocked:
+            if ready:
+                continue
+            match["blocked_by"] = blocked
+        matches.append(match)
     if order_by:
         matches = _order_matches(matches, order_by)
     return {"matches": matches[:limit], "total": len(matches)}
@@ -778,6 +939,7 @@ def save_tree(
     schema: Optional[Dict[str, Any]] = None,
     policy: Optional[Dict[str, Any]] = None,
     override_policy: bool = False,
+    dependencies: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist a tree for later access by tree_id.
 
@@ -785,8 +947,11 @@ def save_tree(
     fields, {"readonly_fields": [...]} protects fields, and {"lock_structure": true} forbids
     adding, inserting, replacing and deleting items. Replacing an existing tree that has a
     policy requires `override_policy=True`. The policy is a guardrail for agents, not access control.
+    `dependencies` renames the fields used for readiness; defaults:
+    {"id_field": "id", "depends_field": "depends_on", "status_field": "status", "done_values": ["done"]}.
     """
     policy = _normalize_policy(policy)
+    dependencies = _normalize_dependencies(dependencies)
     schema_to_use = schema
     existing = None
     if tree_id:
@@ -811,6 +976,7 @@ def save_tree(
         tree_id=tree_id,
         schema=schema_to_use,
         policy=policy,
+        dependencies=dependencies,
     )
 
 

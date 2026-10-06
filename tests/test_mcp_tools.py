@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -794,3 +795,151 @@ class TestMcpAtomicOpsAndCounts(unittest.TestCase):
         result = tools.get_item(self.tree_id, [0, 0], counts=["status", "passes"])
         self.assertEqual(result["counts"], {"status": {"done": 1, "todo": 1}, "passes": {"true": 1, "false": 1}})
         self.assertNotIn("counts", tools.get_item(self.tree_id, []))
+
+
+class TestMcpDependencies(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_store_path = os.environ.get("DRAVERSAL_MCP_STORE_PATH")
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.temp_dir.name
+        # API: design -> auth -> docs; Tests project waits for auth as a whole
+        data = {"title": "Plan", "items": [
+            {"title": "API", "items": [
+                {"title": "Design", "id": "design", "status": "todo"},
+                {"title": "Auth", "id": "auth", "status": "todo", "depends_on": ["design"], "items": [
+                    {"title": "Auth: code", "status": "todo"},
+                ]},
+            ]},
+            {"title": "Tests", "id": "tests", "depends_on": "auth", "items": [
+                {"title": "Tests: write", "status": "todo"},
+            ]},
+            {"title": "Docs", "status": "todo", "depends_on": ["auth", "design"]},
+        ]}
+        self.tree_id = tools.save_tree(data, "items", "title")["tree_id"]
+
+    def tearDown(self):
+        if self.original_store_path is None:
+            os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        else:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def _next(self, **kwargs):
+        return tools.next_item(self.tree_id, where={"status": "todo"}, ready=True, **kwargs)
+
+    def test_ready_follows_dependencies_and_ancestors(self):
+        first = self._next(cursor="a")
+        self.assertEqual(first["item"]["title"], "Design")
+        # Everything else waits for design; Auth: code also waits through its parent
+        tools.set_cursor(self.tree_id, [], cursor="b")
+        blocked = tools.next_item(self.tree_id, cursor="b", where={"status": "todo", "title$ne": "Design"}, ready=True)
+        self.assertEqual((blocked["item"], blocked["blocked"]), (None, 4))
+        tools.modify_item(self.tree_id, [0, 0], key="status", value="done")
+        # Auth's own dependency is done, so Auth and its subtask are ready; an unfinished
+        # parent does not block its own children, only the parent's dependencies do
+        titles = [m["item"]["title"] for m in tools.search(self.tree_id, where={"status": "todo"}, ready=True)["matches"]]
+        self.assertEqual(titles, ["Auth", "Auth: code"])
+        tools.modify_item(self.tree_id, [0, 1], key="status", value="done")
+        titles = [m["item"]["title"] for m in tools.search(self.tree_id, where={"status": "todo"}, ready=True)["matches"]]
+        self.assertEqual(titles, ["Auth: code", "Tests: write", "Docs"])
+
+    def test_blocked_by_in_responses(self):
+        self.assertEqual(tools.get_item(self.tree_id, [1, 0])["blocked_by"], ["auth"])
+        self.assertEqual(tools.get_item(self.tree_id, [2])["blocked_by"], ["auth", "design"])
+        self.assertNotIn("blocked_by", tools.get_item(self.tree_id, [0, 0]))
+        match = [m for m in tools.search(self.tree_id, text="Docs")["matches"]][0]
+        self.assertEqual(match["blocked_by"], ["auth", "design"])
+        # Without ready, next_item still reports what the item waits for
+        tools.set_cursor(self.tree_id, [0, 0])
+        self.assertEqual(tools.next_item(self.tree_id)["blocked_by"], ["design"])
+
+    def test_wait_returns_when_a_dependency_finishes(self):
+        import threading
+        tools.modify_item(self.tree_id, [0, 0], key="status", value="doing")
+        timer = threading.Timer(1.0, lambda: tools.modify_item(self.tree_id, [0, 0], key="status", value="done"))
+        timer.start()
+        started = time.monotonic()
+        result = self._next(cursor="w", wait=10)
+        timer.join()
+        self.assertEqual(result["item"]["title"], "Auth")
+        self.assertLess(time.monotonic() - started, 5)
+        # Nothing left to wait for: returns at once
+        started = time.monotonic()
+        none = tools.next_item(self.tree_id, cursor="w", where={"status": "missing"}, ready=True, wait=10)
+        self.assertEqual((none["item"], none["blocked"]), (None, 0))
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_custom_field_names(self):
+        data = {"title": "r", "c": [
+            {"title": "a", "key": "a", "state": "closed"},
+            {"title": "b", "after": ["a"], "state": "open"},
+        ]}
+        tree_id = tools.save_tree(data, "c", "title", dependencies={
+            "id_field": "key", "depends_field": "after", "status_field": "state", "done_values": ["closed"]})["tree_id"]
+        self.assertNotIn("blocked_by", tools.get_item(tree_id, [1]))
+        with self.assertRaises(ValueError):
+            tools.save_tree(data, "c", "title", dependencies={"needs": "x"})
+
+    def test_validate_tree_reports_dependency_errors(self):
+        self.assertEqual(tools.validate_tree(self.tree_id), {"valid": True})
+        cases = {
+            "Duplicate": {"title": "r", "c": [{"title": "a", "id": "x"}, {"title": "b", "id": "x"}]},
+            "Unknown": {"title": "r", "c": [{"title": "a", "id": "x", "depends_on": ["y"]}]},
+            "cycle": {"title": "r", "c": [{"title": "a", "id": "x", "depends_on": ["z"]}, {"title": "b", "id": "y", "depends_on": ["x"]}, {"title": "c", "id": "z", "depends_on": ["y"]}]},
+        }
+        for word, data in cases.items():
+            tree_id = tools.save_tree(data, "c", "title")["tree_id"]
+            result = tools.validate_tree(tree_id)
+            self.assertFalse(result["valid"], word)
+            self.assertIn(word, result["error"])
+
+
+class TestProjectStore(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "repo"
+        (self.root / "src" / "deep").mkdir(parents=True)
+        self.original_store_path = os.environ.pop("DRAVERSAL_MCP_STORE_PATH", None)
+        self.original_cwd = os.getcwd()
+
+    def tearDown(self):
+        os.chdir(self.original_cwd)
+        if self.original_store_path is not None:
+            os.environ["DRAVERSAL_MCP_STORE_PATH"] = self.original_store_path
+        self.temp_dir.cleanup()
+
+    def test_init_and_discovery_from_subdirectory(self):
+        result = storage.init_project_store(self.root)
+        store = self.root / ".draversal" / "trees"
+        self.assertEqual(Path(result["store_path"]), store.resolve())
+        self.assertEqual(result["indent"], 2)
+        self.assertIn("*.cursor", (self.root / ".draversal" / ".gitignore").read_text())
+        os.chdir(self.root / "src" / "deep")
+        self.assertEqual(storage.find_project_store(), store.resolve())
+        self.assertEqual(storage._default_store_path(), store.resolve())
+        tree_id = tools.save_tree({"title": "r", "c": [{"title": "a"}]}, "c", "title", tree_id="t")["tree_id"]
+        text = storage._tree_file_path(store, tree_id).read_text()
+        self.assertIn('\n  "tree_id": "t"', text)
+        # The environment variable still wins
+        os.environ["DRAVERSAL_MCP_STORE_PATH"] = str(Path(self.temp_dir.name) / "other")
+        self.assertEqual(storage._default_store_path(), Path(self.temp_dir.name) / "other")
+
+    def test_compact_init_and_no_store_outside_projects(self):
+        storage.init_project_store(self.root, indent=None)
+        store = self.root / ".draversal" / "trees"
+        os.chdir(self.root)
+        tools.save_tree({"title": "r", "c": []}, "c", "title", tree_id="t")
+        self.assertNotIn("\n", storage._tree_file_path(store, "t").read_text())
+        os.chdir(self.temp_dir.name)
+        self.assertIsNone(storage.find_project_store())
+
+
+class TestServerInstructions(unittest.TestCase):
+    def test_instructions_describe_the_safe_loop(self):
+        try:
+            from draversal_mcp import server
+        except RuntimeError:
+            self.skipTest("mcp is not installed")
+        text = server.mcp.instructions
+        for word in ("update_found", "if_hash", "increment", "ready", "wait", "counts"):
+            self.assertIn(word, text)

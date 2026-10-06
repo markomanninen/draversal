@@ -30,10 +30,34 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+PROJECT_STORE_SUBPATH = Path(".draversal") / "trees"
+STORE_CONFIG_NAME = "store.config"
+
+
+def find_project_store(start: Optional[Path] = None) -> Optional[Path]:
+    """
+    Find the nearest `.draversal/trees/` directory from `start` (default: the working
+    directory) upwards, like git finds its repository. The home directory's store is
+    the global default, not a project store, so the search stops below home.
+    """
+    home = Path.home().resolve()
+    current = (start or Path.cwd()).resolve()
+    for directory in (current, *current.parents):
+        if directory == home:
+            return None
+        candidate = directory / PROJECT_STORE_SUBPATH
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def _default_store_path() -> Path:
     override = os.getenv(STORE_ENV_VAR)
     if override:
         return Path(os.path.expandvars(override)).expanduser()
+    project_store = find_project_store()
+    if project_store is not None:
+        return project_store
     legacy_path = Path.home() / DEFAULT_STORE_SUBPATH
     if legacy_path.exists():
         return legacy_path
@@ -140,10 +164,52 @@ def tree_lock(tree_id: str, store_path: Optional[Path] = None) -> Iterator[None]
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def _dumps(data: Dict[str, Any]) -> str:
-    # Compact JSON: indentation made writes of large trees about twice as slow.
+def _store_indent(store_dir: Path) -> Optional[int]:
+    # A store may ask for indented files (store.config: {"indent": 2}), which gives
+    # readable git diffs for a store kept in a repository
+    config_path = store_dir / STORE_CONFIG_NAME
+    if not config_path.exists():
+        return None
+    try:
+        indent = json.loads(config_path.read_text()).get("indent")
+    except (ValueError, AttributeError):
+        return None
+    return indent if isinstance(indent, int) and indent > 0 else None
+
+
+def _dumps(data: Dict[str, Any], indent: Optional[int] = None) -> str:
+    # Compact JSON by default: indentation made writes of large trees about twice as slow.
     # Use an editor or `jq .` to view store files formatted.
+    if indent:
+        return json.dumps(data, indent=indent)
     return json.dumps(data, separators=(",", ":"))
+
+
+def init_project_store(root: Optional[Path] = None, indent: Optional[int] = 2) -> Dict[str, Any]:
+    """
+    Create a repository-local store at `<root>/.draversal/trees/`.
+
+    Behavior:
+        - Writes `store.config` with the indent (None for compact files).
+        - Writes `.draversal/.gitignore` so lock, temporary and cursor files stay out of git:
+          cursors are each agent's position, not shared state.
+        - Existing files are kept.
+    """
+    root = (root or Path.cwd()).resolve()
+    store_dir = root / PROJECT_STORE_SUBPATH
+    store_dir.mkdir(parents=True, exist_ok=True)
+    config_path = store_dir / STORE_CONFIG_NAME
+    if not config_path.exists():
+        config_path.write_text(json.dumps({"indent": indent}) + "\n")
+    gitignore_path = store_dir.parent / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_path.write_text("# draversal runtime files\n*.lock\n*.tmp\n*.cursor\n")
+    return {
+        "store_path": str(store_dir),
+        "config": str(config_path),
+        "gitignore": str(gitignore_path),
+        "indent": _store_indent(store_dir),
+    }
 
 
 def _load_store(path: Path) -> Dict[str, Any]:
@@ -182,7 +248,7 @@ def _load_tree_file(path: Path) -> Dict[str, Any]:
 def _write_tree_file(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(_dumps(data))
+    tmp_path.write_text(_dumps(data, _store_indent(path.parent)))
     tmp_path.replace(path)
 
 
@@ -261,6 +327,7 @@ def save_tree(
     cursor_path: Optional[List[int]] = None,
     cursors: Optional[Dict[str, List[int]]] = None,
     policy: Optional[Dict[str, Any]] = None,
+    dependencies: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Save a tree entry.
@@ -296,6 +363,8 @@ def save_tree(
                 schema = existing.get("schema")
             if policy is None:
                 policy = existing.get("policy")
+            if dependencies is None:
+                dependencies = existing.get("dependencies")
         else:
             stored_cursors = {DEFAULT_CURSOR: []}
         created_at = existing.get("created_at", now) if existing else now
@@ -321,6 +390,8 @@ def save_tree(
         }
         if policy:
             entry["policy"] = policy
+        if dependencies:
+            entry["dependencies"] = dependencies
         if dir_store:
             _write_tree_file(_tree_file_path(path, tree_id), entry)
             _write_cursors(path, tree_id, stored_cursors)
@@ -338,6 +409,7 @@ def save_tree(
             "cursors": stored_cursors,
             "schema": schema,
             "policy": policy,
+            "dependencies": dependencies,
         }
 
 

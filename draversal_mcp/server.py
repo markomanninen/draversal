@@ -12,7 +12,15 @@ except ImportError as exc:  # pragma: no cover - only raised when MCP is missing
 
 from . import tools
 
-mcp = FastMCP("draversal")
+# Sent to the client once per session and added to the model's system prompt, so
+# every agent learns the safe way to share a tree without it being repeated in prompts
+INSTRUCTIONS = """draversal stores shared, structured state (task lists, outlines, feature lists) as nested JSON trees that several agents can use at once.
+Work loop: claim with next_item(cursor=<your agent name>, where={"status": "todo"}, ready=true, update_found={"status": "doing", "owner": <your name>}). Finish with ONE apply_tree_ops call: a modify of the claimed path with if_hash from the claim, plus increment/append ops for shared counters or logs.
+On a Conflict error, read the item again and retry; never write values you have not just read.
+If next_item returns item null with blocked > 0, others are still working on prerequisites: call it again with wait (seconds).
+Use get_item(counts=...) for progress instead of keeping totals. Responses hold one item without children; pass depth for more."""
+
+mcp = FastMCP("draversal", instructions=INSTRUCTIONS)
 
 # Tool definitions are sent to the model with every request, so by default only a
 # compact core set is exposed. DRAVERSAL_MCP_TOOLS=all also exposes the older
@@ -293,6 +301,8 @@ def next_item(
     cursor: Optional[str] = None,
     update_found: Optional[Dict[str, Any]] = None,
     if_hash: Optional[str] = None,
+    ready: bool = False,
+    wait: float = 0,
 ) -> Dict[str, Any]:
     """Move the cursor forward and return {item, path, child_count, hash}.
 
@@ -301,6 +311,8 @@ def next_item(
     update_found: fields to set on the item moved to, atomically, e.g. {"status": "doing", "owner": "me"} to claim it.
     cursor: name of an independent cursor (e.g. per agent); default is shared.
     if_hash: hash of the current item as last read; update_current then fails on a conflict.
+    ready: skip items whose depends_on ids (own or ancestors') are not done; unfinished ones show in blocked_by.
+    With nothing ready, "blocked" counts waiting matches; wait (seconds, max 60) polls until one is ready.
     depth: 0 item fields, 1 with direct children, -1 whole subtree. peek: do not move.
     skip_children: jump past the current subtree to the next sibling, or to the next
     sibling of the nearest ancestor (does not stop at the end of a parent).
@@ -316,6 +328,8 @@ def next_item(
         cursor=cursor,
         update_found=update_found,
         if_hash=if_hash,
+        ready=ready,
+        wait=wait,
     )
 
 
@@ -330,6 +344,8 @@ def prev_item(
     cursor: Optional[str] = None,
     update_found: Optional[Dict[str, Any]] = None,
     if_hash: Optional[str] = None,
+    ready: bool = False,
+    wait: float = 0,
 ) -> Dict[str, Any]:
     """Move the cursor back; same options and response as next_item.
 
@@ -345,6 +361,8 @@ def prev_item(
         cursor=cursor,
         update_found=update_found,
         if_hash=if_hash,
+        ready=ready,
+        wait=wait,
     )
 
 
@@ -376,6 +394,7 @@ def search(
     path: Optional[List[int]] = None,
     limit: int = 50,
     order_by: Optional[List[str]] = None,
+    ready: bool = False,
 ) -> Dict[str, Any]:
     """Find items; returns {matches: [{item, path, hash}], total}.
 
@@ -383,6 +402,7 @@ def search(
     where: query on item fields, e.g. {"status": "todo", "priority$ge": 3}; combinable with text.
     path: search under this item only.
     order_by: fields to sort by before limit, "-" for descending, e.g. ["-priority"]; missing values last.
+    ready: only items whose dependencies are done.
     """
     return tools.search(
         tree_id,
@@ -394,6 +414,7 @@ def search(
         path=path,
         limit=limit,
         order_by=order_by,
+        ready=ready,
     )
 
 
@@ -407,11 +428,13 @@ def save_tree(
     schema: Optional[Dict[str, Any]] = None,
     policy: Optional[Dict[str, Any]] = None,
     override_policy: bool = False,
+    dependencies: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist a tree for later access by tree_id.
 
     policy limits later edits: {"editable_fields": [...], "readonly_fields": [...], "lock_structure": bool}.
     Replacing a tree that has a policy needs override_policy=true.
+    dependencies renames readiness fields (defaults: id, depends_on, status, done_values ["done"]).
     """
     saved = tools.save_tree(
         data,
@@ -422,6 +445,7 @@ def save_tree(
         schema=schema,
         policy=policy,
         override_policy=override_policy,
+        dependencies=dependencies,
     )
     # The caller already has the schema, no need to echo it back
     return {k: v for k, v in saved.items() if k != "schema"}
