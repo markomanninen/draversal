@@ -534,7 +534,8 @@ class _Dependencies:
     Readiness by dependencies, computed on read.
 
     An item is ready when every id in its own depends_on, and in its ancestors',
-    belongs to an item whose status is done. Unknown ids count as not done.
+    belongs to an item that is done: its status is done, or, when it has no status,
+    all its children are done. Unknown ids count as not done.
     """
 
     def __init__(self, entry: Dict[str, Any]) -> None:
@@ -544,14 +545,27 @@ class _Dependencies:
         self._done: Optional[set] = None
 
     def _done_ids(self) -> set:
+        # An item with a status is done when the status says so. An item without a status
+        # (a task or project) is done when all its children are, so containers need no
+        # status kept in sync by agents. Post-order walk, iterative for deep trees.
         if self._done is None:
             id_field, status_field = self.settings["id_field"], self.settings["status_field"]
-            done_values, done = self.settings["done_values"], set()
-            stack = [self.data]
+            done_values, children_field = self.settings["done_values"], self.children_field
+            done, finished = set(), {}
+            stack = [(self.data, False)]
             while stack:
-                node = stack.pop()
-                stack.extend(node.get(self.children_field) or [])
-                if id_field in node and node.get(status_field) in done_values:
+                node, visited = stack.pop()
+                children = node.get(children_field) or []
+                if not visited:
+                    stack.append((node, True))
+                    stack.extend((child, False) for child in children)
+                    continue
+                if status_field in node:
+                    is_done = node.get(status_field) in done_values
+                else:
+                    is_done = bool(children) and all(finished[id(child)] for child in children)
+                finished[id(node)] = is_done
+                if is_done and id_field in node:
                     done.add(str(node[id_field]))
             self._done = done
         return self._done

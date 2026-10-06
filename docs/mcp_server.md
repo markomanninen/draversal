@@ -200,7 +200,8 @@ Items can wait for other items through two ordinary fields:
 - `depends_on`: one id or a list of ids.
 
 An item is **ready** when every id in its own `depends_on`, and in its ancestors',
-belongs to an item whose `status` is `done`. A subtask of a task that waits is
+belongs to an item that is done. An item is done when its `status` is `done`, or,
+when it has no status at all (a task or project), when all its children are done. A subtask of a task that waits is
 therefore also waiting. An unfinished parent does not block its own children. Ids
 that match no item count as not done.
 

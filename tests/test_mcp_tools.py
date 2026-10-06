@@ -869,6 +869,21 @@ class TestMcpDependencies(unittest.TestCase):
         self.assertEqual((none["item"], none["blocked"]), (None, 0))
         self.assertLess(time.monotonic() - started, 1)
 
+    def test_item_without_status_is_done_when_its_children_are(self):
+        data = {"title": "r", "items": [
+            {"title": "Schema", "id": "schema", "items": [
+                {"title": "Schema: plan", "status": "done"},
+                {"title": "Schema: build", "status": "todo"},
+            ]},
+            {"title": "API", "id": "api", "depends_on": ["schema"], "items": [
+                {"title": "API: build", "status": "todo"},
+            ]},
+        ]}
+        tree_id = tools.save_tree(data, "items", "title")["tree_id"]
+        self.assertEqual(tools.get_item(tree_id, [1, 0])["blocked_by"], ["schema"])
+        tools.modify_item(tree_id, [0, 1], key="status", value="done")
+        self.assertNotIn("blocked_by", tools.get_item(tree_id, [1, 0]))
+
     def test_custom_field_names(self):
         data = {"title": "r", "c": [
             {"title": "a", "key": "a", "state": "closed"},
