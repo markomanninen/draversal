@@ -300,6 +300,31 @@ agent ran non-interactively (`claude -p`, `codex exec`) with its own named curso
   - There were 0 conflicts, and all 4 agents, including `gpt-6-luna`, followed the protocol.
   - The test took 35 s. Test 2 took about 1.5 min.
 
+**Test 4: dependencies, with the same 4 agents.**
+- Tree: 16 subtasks under 8 tasks. The tasks depend on each other across projects
+  (Schema → API → Auth → Security review → Launch, and Components + API → Pages → Docs → Launch).
+- Tasks have no status. A task counts as done when all its subtasks are.
+- The prompt stated only the goal and the rules. It did not spell out the tool calls,
+  so agents relied on the server's instructions.
+- Result:
+  - 16/16 subtasks were done, and the log matched the owners.
+  - 0 subtasks were completed before their dependencies, and there were 0 conflicts.
+  - Agents waited on the server 7 times when nothing was ready.
+  - The test took 52 s.
+
+**Token use per test** (input includes cached input; most of it is cached):
+
+| Test | Items | Input tokens | Cached | Output tokens | Input per item |
+| --- | --- | --- | --- | --- | --- |
+| 1 (3 agents, hash protocol) | 9 | 1,559,540 | 1,500,822 | 8,855 | 173k |
+| 2 (4 agents, multi-level counters) | 18 | 4,226,888 | 4,089,503 | 22,612 | 235k |
+| 3 (4 agents, atomic ops) | 18 | 1,330,477 | 1,260,162 | 7,194 | 74k |
+| 4 (4 agents, dependencies + waits) | 16 | 1,620,050 | 1,534,417 | 10,858 | 101k |
+
+Atomic operations cut tokens per item by a factor of 3.2 between tests 2 and 3. Most
+input is the agent harness re-sending its own context on every turn. Claude Code agents
+used 400–550k input tokens each in tests 3–4, and Codex agents 180–390k.
+
 ## MCP SDK 2.x
 
 Assessed on 2026-10-07 against the
