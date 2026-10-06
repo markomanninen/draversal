@@ -9,6 +9,11 @@ falling back to the legacy `~/.draversal/trees.json` if it already exists.
 Override with `DRAVERSAL_MCP_STORE_PATH` to point at either a file or a directory.
 See `docs/mcp_server.md` for usage and tool descriptions.
 
+## Performance
+
+See `docs/performance.md` for benchmark results, the `DictSearchQuery` pattern cache
+and notes on very deep trees (iteration cost and recursion limit).
+
 
 ---
 

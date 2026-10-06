@@ -484,13 +484,16 @@ class DictTraversal(dict):
 
         Note:
             - This context manager can be nested.
-            - The state of `inverted_context` will be restored after exiting each with-block.
+            - The state of `inverted_context` will be restored after exiting each with-block,
+                also when the block raises an exception.
         """
         self.inverted_context = not self.inverted_context
         self.iter_method = self.move_to_prev_item if self.inverted_context else self.move_to_next_item
-        yield self
-        self.inverted_context = not self.inverted_context
-        self.iter_method = self.move_to_prev_item if self.inverted_context else self.move_to_next_item
+        try:
+            yield self
+        finally:
+            self.inverted_context = not self.inverted_context
+            self.iter_method = self.move_to_prev_item if self.inverted_context else self.move_to_next_item
 
     @contextmanager
     def new_root(self, merge=False):
@@ -786,24 +789,29 @@ class DictTraversal(dict):
         Sets the item located at the specified path as the current item in the traversal.
 
         Parameters:
-            path (list): The path to the item in the traversal, represented as a list of integers.
+            path (list, tuple): The path to the item relative to the current item, represented as a list of integers.
 
         Returns:
             self: The updated traversal object with `current` set to the item at the specified path.
 
+        Raises:
+            IndexError: If the item does not exist at the specified path.
+            ValueError: If path is not a list or tuple.
+
         Note:
             - Updates both `self.current` and `self.path` attributes.
-            - If the item does not exist at the specified path, `self.current` and `self.path` are not updated.
+            - Path is resolved relative to the current item, like `traversal[path]`, but `self.path`
+                is always stored as an absolute path from the root.
 
         Example:
             ```python
             traversal.set_path_as_current([1, 0])  # Sets the current item to the one located at path [1, 0]
             ```
         """
-        item = self[path]
-        if item:
-            self.current = item
-            self.path = path
+        if not isinstance(path, (list, tuple)):
+            raise ValueError('Path must be a list or tuple of integers.')
+        self.current = self[path]
+        self.path = self.path + list(path)
         return self
 
     def get(self, idx, default=None):
@@ -884,7 +892,7 @@ class DictTraversal(dict):
         items = super().get(self.children_field, [])
         path = self.path
         if not path:
-            return items[0], [0]
+            return (items[0], [0]) if items else (self, [])
         current = items
         for index in path[:-1]:
             current = current[index][self.children_field]
@@ -948,6 +956,8 @@ class DictTraversal(dict):
 
         if self.path:
             path = self.path
+        elif not items:
+            return self, []
         else:
             if sibling_only:
                 path = [len(items)] if items else []
@@ -1271,6 +1281,86 @@ class DictTraversal(dict):
             raise ValueError('Index must be one of the types: int, splice, tuple, list, or str.')
         return self
 
+    def __setitem__(self, idx, value):
+        """
+        Sets an item based on the given index, counterpart of `__getitem__`.
+
+        Behavior:
+            - If index is an int or slice, sets child items of the current item.
+            - If index is a tuple or list, traverses the nested children to set the item.
+            - If index is a string, sets the corresponding attribute in the current item.
+
+        Parameters:
+            idx (int, slice, tuple, list, str): The index to set the item.
+            value (any): The value to set.
+
+        Raises:
+            IndexError: If children are not found at the given index.
+            ValueError: If index type is not supported.
+
+        Example:
+            ```python
+            traversal.set_path_as_current([1])
+            traversal['title'] = 'CHILD 2'  # Sets the title of the current item, not the root
+            traversal[0] = {'title': 'GRANDCHILD 1'}  # Replaces the first child of the current item
+            ```
+        """
+        that = self.current
+        if isinstance(idx, int) or isinstance(idx, slice):
+            that[self.children_field][idx] = value
+        elif isinstance(idx, tuple) or isinstance(idx, list):
+            item = that
+            for i in idx[:-1]:
+                if self.children_field in item:
+                    item = item[self.children_field][i]
+                else:
+                    raise IndexError('Children not found from the given index.')
+            if self.children_field in item:
+                item[self.children_field][idx[-1]] = value
+            else:
+                raise IndexError('Children not found from the given index.')
+        elif isinstance(idx, str):
+            if isinstance(that, DictTraversal):
+                super().__setitem__(idx, value)
+            else:
+                that[idx] = value
+        else:
+            raise ValueError('Index must be one of the types: int, splice, tuple, list, or str.')
+
+    def __reduce_ex__(self, protocol):
+        """
+        Supports copy, deepcopy and pickle.
+
+        Note:
+            - Root data is restored directly to the underlying dict, because the default
+                reconstruction sets keys via `__setitem__`, which writes to the current item.
+        """
+        return (_rebuild_traversal, (self.__class__, self.data), self.__dict__.copy())
+
+    def __contains__(self, key):
+        """
+        Checks if the current item contains the given key, consistent with `__getitem__`.
+
+        Example:
+            ```python
+            traversal.set_path_as_current([1])
+            print('sections' in traversal)  # Output: True
+            ```
+        """
+        that = self.current
+        return dict.__contains__(self, key) if isinstance(that, DictTraversal) else key in that
+
+    def __bool__(self):
+        """
+        Returns True if the current item contains any data.
+
+        Note:
+            - Without this, truthiness would fall back to `__len__`, which counts children,
+                making a traversal pointing to a leaf item falsy.
+        """
+        that = self.current
+        return dict.__len__(self) > 0 if isinstance(that, DictTraversal) else bool(that)
+
     def _without_children(self, items):
         """
         Helper method to remove the children field from a dictionary.
@@ -1302,7 +1392,7 @@ class DictTraversal(dict):
             print(repr(traversal))  # Output: {'title': 'root'}
             ```
         """
-        if not self.current:
+        if self.current is None:
             raise ValueError('Internal error: missing the current item.')
         return str(self._without_children(self.current.items()))
 
@@ -1379,11 +1469,13 @@ class DictTraversal(dict):
                 print(traversal.peek_next(2))  # Output: {'title': 'Grandgrandchild'}
             ```
         """
-        current, path = self.current.copy(), self.path.copy()
+        current, path = self.current, self.path
         func = self.move_to_prev_item if self.inverted_context else self.move_to_next_item
-        for _ in range(steps if steps > 0 else 1):
-            item = func().current
-        self.current, self.path = current, path
+        try:
+            for _ in range(steps if steps > 0 else 1):
+                item = func().current
+        finally:
+            self.current, self.path = current, path
         return self._without_children(item.items())
 
     def peek_prev(self, steps=1):
@@ -1413,11 +1505,13 @@ class DictTraversal(dict):
                 traversal.peek_prev(2)  # Output: {'title': 'Child 2'}
             ```
         """
-        current, path = self.current.copy(), self.path.copy()
+        current, path = self.current, self.path
         func = self.move_to_next_item if self.inverted_context else self.move_to_prev_item
-        for _ in range(steps if steps > 0 else 1):
-            item = func().current
-        self.current, self.path = current, path
+        try:
+            for _ in range(steps if steps > 0 else 1):
+                item = func().current
+        finally:
+            self.current, self.path = current, path
         return self._without_children(item.items())
 
     def find_paths(self, label_field, titles):
@@ -1436,6 +1530,8 @@ class DictTraversal(dict):
             - Initializes an empty list `results` to store matching items and their paths.
             - Defines a recursive function `_` to search for items with matching titles.
             - Calls `_` starting from the current item's subitems, passing the list of remaining titles to match.
+            - Every sibling matching a title is followed, so duplicate labels on any level are supported.
+            - Items without the `label_field` are skipped.
             - Appends matching items and their paths to `results`. Items in the result list do not contain childrens.
 
         Example:
@@ -1450,14 +1546,14 @@ class DictTraversal(dict):
 
         def _(subitems, remaining_titles, new_path=[]):
             for i, item in enumerate(subitems):
-                if remaining_titles and item[label_field] == remaining_titles[0]:
+                if label_field in item and item[label_field] == remaining_titles[0]:
                     local_path = new_path + [i]
                     if len(remaining_titles) == 1:
                         results.append((self._without_children(item.items()), local_path))
-                    subitems = item.get(self.children_field, [])
-                    if subitems:
-                        return _(subitems, remaining_titles[1:], local_path)
-        _(self.current.get(self.children_field, []), titles)
+                    else:
+                        _(item.get(self.children_field, []), remaining_titles[1:], local_path)
+        if titles:
+            _(self.current.get(self.children_field, []), titles)
         return results
 
     def search(self, query, label_field=None):
@@ -1469,12 +1565,19 @@ class DictTraversal(dict):
             label_field (str): Field name to be used as a target of search for each item, if query is `str` or `re.Pattern`. Default is None.
     
         Returns:
-            list: A list of tuples, each containing a matching item and its path.
+            list: A list of tuples, each containing a matching item (without children) and its path.
+
+        Raises:
+            ValueError: If `label_field` is not given for a `str` or `re.Pattern` query.
 
         Behavior:
             - Initializes an empty list `results` to store matching items and their paths.
             - Defines a nested function `_` to recursively search for items with matching titles.
             - Calls `_` starting from the current item's subitems.
+            - Items without `label_field` are skipped, and non-string labels are compared as strings.
+            - With `DictSearchQuery`, each item is queried separately with its own fields (children excluded),
+                so all query keys must match within the same item. The current item itself is included
+                with an empty path.
             - Appends matching items and their paths to `results`.
             - Returns `results`.
 
@@ -1484,17 +1587,28 @@ class DictTraversal(dict):
             result2 = traversal.search(re.compile(r'Grandchild [0-9]+'), 'title')  # Returns: [({'title': 'Grandchild 1'}, [1, 0]), ({'title': 'Grandchild 2'}, [1, 1])]
             ```
         """
-        # If query is a DictSearchQuery, execute search and reconstruct flattened keys back to nested dictionary structure.
-        if isinstance(query, DictSearchQuery):
-            return [(self._without_children(query.reconstruct_item(k, self.current).items()), [int(match) for match in re.findall(f"{self.children_field}%s" % query.list_index_indicator.replace('%s', '(\d+)'), k)]) for k, _ in query.execute(self.current).items()]
-        # Else perform plain string or regex search.
         results = []
+        # If query is a DictSearchQuery, execute it against the fields of each item.
+        if isinstance(query, DictSearchQuery):
+            def _(item, path):
+                fields = self._without_children(item.items())
+                if query.execute(fields):
+                    results.append((fields, path))
+                for i, subitem in enumerate(item.get(self.children_field, [])):
+                    _(subitem, path + [i])
+            _(self.current, [])
+            return results
+        # Else perform plain string or regex search.
+        if label_field is None:
+            raise ValueError('Label field must be given for a string or regular expression query.')
         def _(subitems, new_path=[]):
             for i, item in enumerate(subitems):
                 local_path = new_path + [i]
-                if ((isinstance(query, str) and query.lower() in item[label_field].lower()) or
-                    (isinstance(query, re.Pattern) and query.search(item[label_field]))):
-                    results.append((self._without_children(item.items()), local_path))
+                if label_field in item:
+                    label = str(item[label_field])
+                    if ((isinstance(query, str) and query.lower() in label.lower()) or
+                        (isinstance(query, re.Pattern) and query.search(label))):
+                        results.append((self._without_children(item.items()), local_path))
                 subitems = item.get(self.children_field, [])
                 if subitems:
                     _(subitems, local_path)
@@ -1593,6 +1707,15 @@ class DictTraversal(dict):
         if items:
             _(items[0])
         return '\n'.join(toc)
+
+
+def _rebuild_traversal(cls, data):
+    """
+    Helper for `DictTraversal.__reduce_ex__` to create an instance with root data, without calling `__init__`.
+    """
+    traversal = cls.__new__(cls)
+    dict.update(traversal, data)
+    return traversal
 
 
 def validate_data(data, children_field, label_field=None):

@@ -1,6 +1,18 @@
 import operator as op
 from fnmatch import translate
+from functools import lru_cache
 import re
+
+
+@lru_cache(maxsize=256)
+def _compile_wildcard(pattern):
+    """
+    Translates a wildcard pattern to a compiled regular expression.
+
+    Note:
+        - Cached, because `fnmatch.translate` is costly and the same query key is matched against every flattened field.
+    """
+    return re.compile(translate(pattern))
 
 
 def flatten_dict(data, field_separator='.', list_index_indicator='#%s'):
@@ -82,7 +94,7 @@ def reconstruct_item(query_key, item, field_separator='.', list_index_indicator=
         print(reconstruct_item('d[1]', data, list_index_indicator='[%s]'))  # Outputs: {'f': 3, 'g': 4}
         ```
     """
-    list_index_pattern = re.escape(list_index_indicator).replace('%s', '(\d+)')
+    list_index_pattern = re.escape(list_index_indicator).replace('%s', r'(\d+)')
     list_index_regex = re.compile(f'(.*){list_index_pattern}')
     
     def get_item_by_key(item, key, wrap_in_dict=False):
@@ -330,7 +342,7 @@ class DictSearchQuery:
             self._match_wildcards("a?b", "aab")  # Results: True
             ```
         """
-        return self.support_wildcards and self._is_wildcard(query_key) and re.match(translate(query_key), new_key)
+        return self.support_wildcards and self._is_wildcard(query_key) and _compile_wildcard(query_key).match(new_key)
 
     def _match(self, query_key, new_key):
         """
