@@ -438,6 +438,25 @@ class TestMcpCoreTools(unittest.TestCase):
         self.assertEqual(len(tools.visualize_tree(self.tree_id, max_lines=0).split("\n")), 6)
         self.assertEqual(tools.visualize_tree(self.tree_id, current_path=[0], max_depth=0), "A* (+2)")
 
+    def test_search_order_by(self):
+        ops = [
+            {"op": "modify", "path": [0], "changes": {"priority": 2, "due": "2026-11-01"}},
+            {"op": "modify", "path": [0, 1], "changes": {"priority": 5}},
+            {"op": "modify", "path": [1], "changes": {"priority": 2, "due": "2026-10-15"}},
+            {"op": "modify", "path": [2], "changes": {"priority": "high"}},
+        ]
+        tools.apply_tree_ops(self.tree_id, ops)
+        titles = lambda result: [match["item"]["title"] for match in result["matches"]]
+        everything = {"title$regex": ".*"}
+        # Descending numbers first, then other types, items without the field last in tree order
+        self.assertEqual(titles(tools.search(self.tree_id, where=everything, order_by="-priority")), ["A2", "A", "B", "C", "A1"])
+        self.assertEqual(titles(tools.search(self.tree_id, where=everything, order_by=["priority"])), ["A", "B", "A2", "C", "A1"])
+        # Second key breaks ties
+        self.assertEqual(titles(tools.search(self.tree_id, where=everything, order_by=["-priority", "due"]))[:3], ["A2", "B", "A"])
+        # Sorting happens before the limit
+        top = tools.search(self.tree_id, where={"status": "todo"}, order_by="-priority", limit=1)
+        self.assertEqual((titles(top), top["total"]), (["A2"], 3))
+
     def test_skip_children(self):
         tools.set_cursor(self.tree_id, [0])
         self.assertEqual(tools.next_item(self.tree_id, skip_children=True)["path"], [1])

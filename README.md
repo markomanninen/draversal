@@ -471,6 +471,12 @@ Retrieves an item based on the given index.
  - If index is a tuple or list, traverses the nested children to retrieve the item.
  - If index is a string, retrieves the value of the corresponding attribute in the current item.
 
+## Note
+- An int or slice index on an item without a children field returns `{}` instead of raising
+`IndexError`, while a tuple or list path raises `IndexError` when a level has no children.
+An int index out of range of existing children raises `IndexError`.
+- A missing string key returns None, like `dict.get`.
+
 ## Example
  ```python
  item = traversal[0]  # Retrieves the first child of the current item
@@ -761,11 +767,13 @@ Retrieves the value at the specified index key at the current item.
 ## Behavior
  - Retrieves the value at the given index key from the object.
  - If the index key is not found or the value is None, returns the default value.
+ - A child index or path that does not exist also returns the default value.
 
 ## Example
  ```python
  value = traversal.get('new_field', default='Not Found')
  print(value)  # Output will be the value of the key 'new_field' or 'Not Found'
+ child = traversal.get(5, default={})  # The sixth child of the current item or {}
  ```
 
 ---

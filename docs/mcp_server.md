@@ -120,6 +120,11 @@ further below. That set has 35 tools and is about 3,200 tokens.
     It can be combined with `text`.
   - `path`: search only under this item.
   - `limit`: maximum number of matches; defaults to 50.
+  - `order_by`: a field name or a list of names to sort by before `limit` is applied.
+    A `-` prefix sorts descending, for example `["-priority", "due"]`. Numbers come
+    before strings. Items without the field come last, and ties keep tree order. For
+    example, `search(where={"status": "todo"}, order_by="-priority", limit=1)` returns the
+    open task with the highest priority.
 - `apply_tree_ops`: Edit a tree in one call. Ops run in order and are saved together:
   - `{"op": "add_child", "path": parent, "item": {...}}`
   - `{"op": "insert_child", "path": parent, "index": i, "item": {...}}`

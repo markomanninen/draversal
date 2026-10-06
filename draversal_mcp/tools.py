@@ -583,6 +583,37 @@ def get_item(tree_id: str, path: Optional[List[int]] = None, depth: int = 0) -> 
     return _item_response(traversal.current, traversal.path, entry["children_field"], depth)
 
 
+def _sort_value(value: Any) -> Tuple[int, Any]:
+    # Values of different types are grouped, so mixed fields can be sorted without errors
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (0, value)
+    if isinstance(value, str):
+        return (1, value)
+    return (2, json.dumps(value, sort_keys=True, default=str))
+
+
+def _order_matches(matches: List[Dict[str, Any]], order_by: List[str] | str) -> List[Dict[str, Any]]:
+    fields = [order_by] if isinstance(order_by, str) else list(order_by)
+    # Stable sorts from the last key to the first; items without the field go last
+    for field in reversed(fields):
+        descending = field.startswith("-")
+        name = field[1:] if descending else field
+        groups: Dict[int, List[Dict[str, Any]]] = {}
+        missing = []
+        for match in matches:
+            value = match["item"].get(name)
+            if value is None:
+                missing.append(match)
+            else:
+                groups.setdefault(_sort_value(value)[0], []).append(match)
+        # Numbers, then strings, then other values; the direction applies within each group
+        matches = []
+        for rank in sorted(groups):
+            matches += sorted(groups[rank], key=lambda m: _sort_value(m["item"][name])[1], reverse=descending)
+        matches += missing
+    return matches
+
+
 def search(
     tree_id: str,
     text: Optional[str] = None,
@@ -592,6 +623,7 @@ def search(
     where: Optional[Dict[str, Any]] = None,
     path: Optional[List[int]] = None,
     limit: int = 50,
+    order_by: Optional[List[str] | str] = None,
 ) -> Dict[str, Any]:
     """Search items and return them without children, with absolute paths.
 
@@ -600,6 +632,9 @@ def search(
     - `where`: DictSearchQuery style query against each item's own fields, e.g. {"status": "todo"}.
       Can be combined with `text`.
     - `path`: search only under this item. At most `limit` matches are returned; `total` tells all.
+    - `order_by`: item field name or list of names to sort by before the limit is applied,
+      "-" prefix for descending, e.g. ["-priority", "due"]. Items without the field come last;
+      otherwise matches are in tree order.
     """
     traversal, entry = _get_traversal(tree_id, path)
     label_field = entry.get("label_field")
@@ -628,6 +663,8 @@ def search(
                 if label_field in item and pattern.search(str(item[label_field]))
             ]
     matches = [{"item": item, "path": base + item_path} for item, item_path in results]
+    if order_by:
+        matches = _order_matches(matches, order_by)
     return {"matches": matches[:limit], "total": len(matches)}
 
 

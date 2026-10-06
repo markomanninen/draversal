@@ -163,6 +163,30 @@ class TestDictTraversalRegressions(unittest.TestCase):
         self.assertEqual([path for _, path in result], [[0], [1], [1, 0]])
 
 
+class TestGetAndGetItem(unittest.TestCase):
+
+    def test_get_returns_default_for_missing_child_index_or_path(self):
+        traversal = demo()
+        self.assertEqual(traversal.get(5, 'D'), 'D')
+        self.assertEqual(traversal.get([1, 9], 'D'), 'D')
+        self.assertEqual(traversal.get((0, 0), 'D'), 'D')
+        self.assertEqual(traversal.get(0)['title'], 'Child 1')
+        self.assertEqual(traversal.get('missing', 'D'), 'D')
+        with self.assertRaises(ValueError):
+            traversal.get(1.5)
+
+    def test_getitem_on_item_without_children(self):
+        # Documented behavior: int/slice on a leaf gives {}, a path raises IndexError
+        traversal = demo().set_path_as_current([0])
+        self.assertEqual(traversal[0], {})
+        self.assertEqual(traversal[:], {})
+        with self.assertRaises(IndexError):
+            traversal[(0,)]
+        with self.assertRaises(IndexError):
+            root(traversal)[5]
+        self.assertIsNone(traversal['missing'])
+
+
 class TestNewRootMerge(unittest.TestCase):
 
     def test_merge_adds_children_to_leaf_and_removes_fields(self):

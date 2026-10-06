@@ -349,12 +349,14 @@ def search(
     where: Optional[Dict[str, Any]] = None,
     path: Optional[List[int]] = None,
     limit: int = 50,
+    order_by: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Find items; returns {matches: [{item, path}], total}.
 
     text: label substring (regex if regex=true). titles: label chain from the root, e.g. ["Project", "Task"].
     where: query on item fields, e.g. {"status": "todo", "priority$ge": 3}; combinable with text.
     path: search under this item only.
+    order_by: fields to sort by before limit, "-" for descending, e.g. ["-priority"]; missing values last.
     """
     return tools.search(
         tree_id,
@@ -365,6 +367,7 @@ def search(
         where=where,
         path=path,
         limit=limit,
+        order_by=order_by,
     )
 
 

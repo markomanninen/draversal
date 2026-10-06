@@ -147,7 +147,11 @@ size are the real cost.
    current subtree and continues on a higher level, which is useful for skipping
    a project's subtasks. The Python API keeps `sibling_only`, with docstrings
    rewritten to describe the real behaviour.
-11. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
+11. **`search` takes `order_by`.** One or more item fields, with `-` for descending.
+   Sorting happens before the limit, so the highest-priority open task is one small
+   call: `where={"status": "todo"}, order_by="-priority", limit=1`. This keeps the
+   free-form field principle: it sorts on any field and needs no special field.
+12. **Root-level modifications persist**, and **`mcp` is pinned to `<2`**,
    because the 2.x SDK removed `FastMCP`.
 
 ### Design principle: free-form fields
@@ -167,8 +171,37 @@ others. Examples:
 - **Writing the tree file.** Every write still serializes the whole tree
   (about 1 MB and roughly 10 ms on 11k nodes). Only very large lists would
   benefit from one file per subtree or an append-only change log.
-- **Ordering by field.** `where` filters, but the cursor always follows tree
-  order. An optional `order_by` for `search` would allow "highest priority
-  first" without new fields.
 - **The legacy single-file store** (`trees.json`) still rewrites the whole store
   when the cursor moves.
+
+## MCP SDK 2.x
+
+Assessed on 2026-10-07 against the
+[v2 migration guide](https://py.sdk.modelcontextprotocol.io/v2/migration/) and the
+[release history](https://github.com/modelcontextprotocol/python-sdk/releases).
+2.0.0 was released on 2026-07-28 and 2.3.0 is the latest. The 1.x line still gets
+releases: 1.30.0 came out on 2026-09-07. The guide says 1.x keeps receiving
+critical bug fixes and security patches, and it recommends pinning `mcp<2` until
+migrated. draversal pins `mcp>=1.2,<2`.
+
+| 2.x brings | Value for draversal |
+|---|---|
+| Protocol revision 2026-07-28 (1.30 speaks 2024-11-05 … 2025-11-25) | None yet. Clients still negotiate older revisions, and the changes mostly concern HTTP transport and statelessness. |
+| `InputRequiredResult` (a tool can ask the user for input mid-call) | Possible later, for example to confirm deleting a subtree. |
+| Sync handlers run concurrently on worker threads | **A risk.** Store writes are read-modify-write without locking. 1.x runs sync tools one at a time, so concurrent calls cannot lose an update. 2.x would need file locking. |
+| Stricter validation, RFC 6570 resource templates, path safety, OAuth/HTTP changes | Not used by a local stdio tree server. |
+
+Migration costs:
+- `FastMCP` becomes `MCPServer`, and the constructor and transport arguments change.
+- The input-schema compaction relies on 1.x internals (`_tool_manager`). It would
+  silently stop working, adding about 400 tokens back to every request, until it
+  is reimplemented.
+- New required dependencies: `opentelemetry-api`, `httpx2` and an exactly pinned `mcp-types`.
+
+**Migrate when any of these happens:**
+- the end of 1.x maintenance is announced
+- a client requires the 2026-07-28 revision
+- confirmations or HTTP deployment become needed
+
+Do file locking and the schema compaction as part of the same change.
+

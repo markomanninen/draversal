@@ -835,14 +835,19 @@ class DictTraversal(dict):
         Behavior:
             - Retrieves the value at the given index key from the object.
             - If the index key is not found or the value is None, returns the default value.
+            - A child index or path that does not exist also returns the default value.
 
         Example:
             ```python
             value = traversal.get('new_field', default='Not Found')
             print(value)  # Output will be the value of the key 'new_field' or 'Not Found'
+            child = traversal.get(5, default={})  # The sixth child of the current item or {}
             ```
         """
-        value = self[idx]
+        try:
+            value = self[idx]
+        except IndexError:
+            return default
         return default if value is None else value
 
     def move_to_next_item(self, sibling_only=False):
@@ -1216,6 +1221,12 @@ class DictTraversal(dict):
         Attributes:
             current (dict): The current item in the traversal.
             children_field (str): The key used to identify children in the dictionary.
+
+        Note:
+            - An int or slice index on an item without a children field returns `{}` instead of raising
+                `IndexError`, while a tuple or list path raises `IndexError` when a level has no children.
+                An int index out of range of existing children raises `IndexError`.
+            - A missing string key returns None, like `dict.get`.
 
         Example:
             ```python
